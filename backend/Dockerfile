@@ -6,6 +6,8 @@ RUN groupadd --system app && useradd --system --gid app --home /srv app
 
 COPY pyproject.toml ./
 COPY app ./app
+COPY alembic.ini ./
+COPY migrations ./migrations
 RUN pip install --no-cache-dir .
 
 USER app

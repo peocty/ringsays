@@ -256,5 +256,9 @@ def test_full_happy_path_timeline(requested: Intent, now: datetime) -> None:
     i = sm.start_call(i, t + timedelta(minutes=15))
     i = sm.record_outcome(i, OutcomeCode.RESOLVED, Actor.CALLER, t + timedelta(minutes=21))
     assert [e.to_status for e in i.timeline] == [
-        S.REQUESTED, S.DELIVERED, S.SCHEDULED, S.IN_PROGRESS, S.COMPLETED
+        S.REQUESTED,
+        S.DELIVERED,
+        S.SCHEDULED,
+        S.IN_PROGRESS,
+        S.COMPLETED,
     ]

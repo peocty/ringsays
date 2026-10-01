@@ -23,8 +23,31 @@ Requirements: Node 22, pnpm 10, Python 3.11 or later, Docker.
 
 ```bash
 make setup     # install TypeScript and Python dependencies
+make up        # Docker: Postgres, Redis, NATS, migrations and API, all with mock adapters
+```
+
+Without Docker, against a local PostgreSQL 16:
+
+```bash
+psql -U postgres -f infra/sql/00-roles.sql
+psql -U postgres -c "CREATE DATABASE ringsays OWNER ringsays_owner"
+make migrate   # create schemas, row level security and grants
+make seed      # MOCK bank tenant; prints client id and secret once
 make check     # lint contracts, lint and type check backend, run all tests
-make up        # start Postgres, Redis, NATS and API with mock adapters
+```
+
+Integration tests create and drop their own database `ringsays_test`, using
+`RINGSAYS_TEST_PG_ADMIN_URL` (default `postgresql+psycopg://postgres@127.0.0.1:5432/postgres`).
+
+Try the API:
+
+```bash
+curl -X POST localhost:8000/oauth/token -d grant_type=client_credentials -d client_id=... -d client_secret=...
+curl -X POST localhost:8000/v1/intents -H "Authorization: Bearer <token>" \
+  -H "Idempotency-Key: $(uuidgen)" -H "Content-Type: application/json" \
+  -d '{"to":{"phone":"+966500000009"},"agent_id":"agt_demo_01","purpose_code":"LOAN.APPLICATION.UPDATE",
+       "masked_reference":"4821","priority":"NORMAL","expected_duration_min":5,
+       "valid_from":"<now+5m ISO>","valid_until":"<now+65m ISO>"}'
 ```
 
 API health: http://localhost:8000/health

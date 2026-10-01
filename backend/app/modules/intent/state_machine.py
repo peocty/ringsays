@@ -92,9 +92,7 @@ def transition(
     if actor not in actors:
         raise ActorNotAllowed(f"{actor} may not move intent from {intent.status} to {to}")
     event = IntentEvent(at=now, from_status=intent.status, to_status=to, actor=actor, reason=reason)
-    return intent.with_changes(
-        status=to, updated_at=now, timeline=(*intent.timeline, event), **changes
-    )
+    return intent.with_changes(status=to, updated_at=now, timeline=(*intent.timeline, event), **changes)
 
 
 def is_expired(intent: Intent, now: datetime) -> bool:
@@ -143,15 +141,24 @@ def respond(
         chosen = Slot(start=start, end=start + timedelta(minutes=intent.expected_duration_min))
         _check_slot_against_deadline(intent, chosen)
         return transition(
-            intent, S.SCHEDULED, A.RECEIVER, now,
-            scheduled_slot=chosen, valid_until=_extended_validity(intent, chosen), proposed_slots=(),
+            intent,
+            S.SCHEDULED,
+            A.RECEIVER,
+            now,
+            scheduled_slot=chosen,
+            valid_until=_extended_validity(intent, chosen),
+            proposed_slots=(),
         )
 
     if action is ResponseAction.PROPOSE:
         _check_proposals(intent, proposed_slots, now)
         return transition(
-            intent, S.RESCHEDULED, A.RECEIVER, now,
-            proposed_slots=tuple(proposed_slots), scheduled_slot=None,
+            intent,
+            S.RESCHEDULED,
+            A.RECEIVER,
+            now,
+            proposed_slots=tuple(proposed_slots),
+            scheduled_slot=None,
             valid_until=_extended_validity(intent, max(proposed_slots, key=lambda s: s.end)),
         )
 
@@ -161,14 +168,23 @@ def respond(
         if slot.start <= now:
             raise RuleViolation("slot is in the past")
         return transition(
-            intent, S.SCHEDULED, A.RECEIVER, now,
-            scheduled_slot=slot, valid_until=_extended_validity(intent, slot), proposed_slots=(),
+            intent,
+            S.SCHEDULED,
+            A.RECEIVER,
+            now,
+            scheduled_slot=slot,
+            valid_until=_extended_validity(intent, slot),
+            proposed_slots=(),
         )
 
     if action is ResponseAction.MESSAGE:
         return transition(
-            intent, S.DECLINED, A.RECEIVER, now,
-            reason="message instead", decline_reason=DeclineReason.MESSAGE_INSTEAD,
+            intent,
+            S.DECLINED,
+            A.RECEIVER,
+            now,
+            reason="message instead",
+            decline_reason=DeclineReason.MESSAGE_INSTEAD,
         )
 
     if action is ResponseAction.DECLINE:
@@ -187,8 +203,13 @@ def caller_accept_slot(intent: Intent, slot: Slot, now: datetime) -> Intent:
     if slot.start <= now:
         raise RuleViolation("slot is in the past")
     return transition(
-        intent, S.SCHEDULED, A.CALLER, now,
-        scheduled_slot=slot, valid_until=_extended_validity(intent, slot), proposed_slots=(),
+        intent,
+        S.SCHEDULED,
+        A.CALLER,
+        now,
+        scheduled_slot=slot,
+        valid_until=_extended_validity(intent, slot),
+        proposed_slots=(),
     )
 
 
@@ -198,9 +219,7 @@ def start_call(intent: Intent, now: datetime) -> Intent:
     if intent.status is S.SCHEDULED and intent.scheduled_slot is not None:
         if now < intent.scheduled_slot.start - timedelta(minutes=10):
             raise RuleViolation("call is more than 10 minutes before scheduled slot")
-    return transition(
-        intent, S.IN_PROGRESS, A.SYSTEM, now, attempt_count=intent.attempt_count + 1
-    )
+    return transition(intent, S.IN_PROGRESS, A.SYSTEM, now, attempt_count=intent.attempt_count + 1)
 
 
 def record_outcome(intent: Intent, code: OutcomeCode, actor: Actor, now: datetime) -> Intent:

@@ -10,7 +10,9 @@ services:
       POSTGRES_PASSWORD: ringsays
       POSTGRES_DB: ringsays
     ports: ["5432:5432"]
-    volumes: [pgdata:/var/lib/postgresql/data]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../sql:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ringsays"]
       interval: 5s
@@ -29,17 +31,26 @@ services:
     ports: ["4222:4222", "8222:8222"]
     volumes: [natsdata:/data]
 
+  migrate:
+    build: ../../backend
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      RINGSAYS_MIGRATION_DATABASE_URL: postgresql+psycopg://ringsays_owner:ringsays_owner@postgres:5432/ringsays
+    depends_on:
+      postgres: { condition: service_healthy }
+
   api:
     build: ../../backend
     environment:
       RINGSAYS_ENVIRONMENT: local
-      RINGSAYS_DATABASE_URL: postgresql+psycopg://ringsays:ringsays@postgres:5432/ringsays
+      RINGSAYS_DATABASE_URL: postgresql+psycopg://ringsays_app:ringsays_app@postgres:5432/ringsays
+      RINGSAYS_WORKER_DATABASE_URL: postgresql+psycopg://ringsays_worker:ringsays_worker@postgres:5432/ringsays
       RINGSAYS_REDIS_URL: redis://redis:6379/0
       RINGSAYS_NATS_URL: nats://nats:4222
       RINGSAYS_USE_MOCK_ADAPTERS: "true"
     ports: ["8000:8000"]
     depends_on:
-      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
       nats: { condition: service_started }
 

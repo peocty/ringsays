@@ -293,8 +293,12 @@ components:
         follow_up_at: { type: string, format: date-time }
 
     PurposeCodeCreate:
+      allOf:
+        - $ref: "#/components/schemas/PurposeCodeFields"
+      unevaluatedProperties: false
+
+    PurposeCodeFields:
       type: object
-      additionalProperties: false
       required: [code, display_text, max_priority, max_duration_min, allowed_channels]
       properties:
         code:
@@ -311,7 +315,7 @@ components:
 
     PurposeCode:
       allOf:
-        - $ref: "#/components/schemas/PurposeCodeCreate"
+        - $ref: "#/components/schemas/PurposeCodeFields"
         - type: object
           required: [status, version]
           properties:

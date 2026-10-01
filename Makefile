@@ -1,4 +1,4 @@
-.PHONY: setup check contracts backend ts up down
+.PHONY: setup check contracts backend ts up down migrate seed
 
 setup:
 	pnpm install
@@ -20,3 +20,9 @@ up:
 
 down:
 	docker compose -f infra/docker/docker-compose.yml down
+
+migrate:
+	cd backend && .venv/bin/alembic upgrade head
+
+seed:
+	cd backend && .venv/bin/python -m app.scripts.seed

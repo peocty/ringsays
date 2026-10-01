@@ -35,6 +35,8 @@ def policy() -> PurposeCodePolicy:
 def request_() -> EnterpriseIntentRequest:
     return EnterpriseIntentRequest(
         tenant_id=uuid4(),
+        to_phone="+966500000001",
+        agent_id="agt_test",
         purpose_code="MORTGAGE.DOC.CLARIFY",
         priority=Priority.NORMAL,
         expected_duration_min=5,

@@ -139,6 +139,9 @@ class Intent:
     status: IntentStatus
     created_at: datetime
     updated_at: datetime
+    to_phone: str | None = None
+    agent_id: str | None = None
+    department_id: UUID | None = None
     purpose_code: str | None = None
     masked_reference: str | None = None
     subject: str | None = None

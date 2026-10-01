@@ -44,6 +44,8 @@ class PurposeCodePolicy:
 @dataclass(frozen=True, slots=True)
 class EnterpriseIntentRequest:
     tenant_id: UUID
+    to_phone: str
+    agent_id: str
     purpose_code: str
     priority: Priority
     expected_duration_min: int
@@ -56,6 +58,7 @@ class EnterpriseIntentRequest:
     parent_intent_id: UUID | None = None
     language: str = "ar"
     offered_slots: tuple[Slot, ...] = ()
+    department_id: UUID | None = None
 
 
 def validate_enterprise_request(
@@ -109,6 +112,9 @@ def create_enterprise_intent(
     return Intent(
         intent_id=uuid7(),
         tenant_id=req.tenant_id,
+        to_phone=req.to_phone,
+        agent_id=req.agent_id,
+        department_id=req.department_id,
         purpose_code=req.purpose_code,
         masked_reference=req.masked_reference,
         priority=req.priority,
