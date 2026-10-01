@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "RingSays",
+    "slug": "ringsays",
+    "scheme": "ringsays",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "com.peocit.ringsays",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.peocit.ringsays",
+      "allowBackup": false
+    },
+    "web": {
+      "output": "single",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      ["expo-notifications", { "color": "#0f5c4d" }],
+      ["expo-localization", { "supportsRTL": true, "supportedLocales": ["ar", "en"] }]
+    ],
+    "experiments": { "typedRoutes": false },
+    "extra": {
+      "apiBase": "http://127.0.0.1:8000"
+    }
+  }
+}
