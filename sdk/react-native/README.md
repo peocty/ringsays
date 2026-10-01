@@ -6,7 +6,7 @@ without a RingSays account.
 
 ## Flow
 
-1. Organisation backend creates an intent with `channel_preference` including `APP_SDK`; the
+1. Organisation backend creates an intent with `channel_preference` including `SDK`; the
    response carries `context_token`.
 2. Backend delivers token to its own app (its push, in app inbox).
 3. App renders `<IntentCard token=… />`. First install that opens a token owns it; any other
