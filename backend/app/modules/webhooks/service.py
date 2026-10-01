@@ -114,8 +114,21 @@ def is_public_address(raw: str) -> bool:
     return bool(ip.is_global)
 
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def is_loopback_url(url: str) -> bool:
+    parts = urlsplit(url)
+    return parts.scheme == "http" and (parts.hostname or "") in _LOOPBACK_HOSTS
+
+
 def validate_url(url: str) -> None:
     parts = urlsplit(url)
+    # Local environment only: a bank backend on the developer's machine (mock bank, stage 7).
+    if settings.environment == "local" and is_loopback_url(url):
+        if parts.username or parts.password:
+            raise RuleViolation("webhook url must not contain credentials")
+        return
     if parts.scheme != "https" or not parts.hostname:
         raise RuleViolation("webhook url must be https with a host name")
     if parts.username or parts.password:
@@ -275,6 +288,29 @@ class HttpxSender:
                 )
                 response = client.send(request, stream=True)
                 response.close()
+        except httpx.HTTPError as exc:
+            return HttpResult(None, f"http: {type(exc).__name__}")
+        return HttpResult(response.status_code)
+
+
+class LoopbackHttpSender:
+    """Local environment only: delivers to a receiver on this machine (http allowed, any port).
+    Anything not loopback goes to `other` (MOCK in local). Refuses everything outside local."""
+
+    def __init__(self, other: HttpSender) -> None:
+        self.other = other
+
+    def post(self, url: str, body: bytes, headers: dict[str, str]) -> HttpResult:
+        if not is_loopback_url(url):
+            return self.other.post(url, body, headers)
+        if settings.environment != "local":
+            return HttpResult(None, "refused: loopback delivery is local only")
+        import httpx
+
+        timeout = httpx.Timeout(TIMEOUT_S)
+        try:
+            with httpx.Client(timeout=timeout, follow_redirects=False, trust_env=False) as client:
+                response = client.post(url, content=body, headers=headers)
         except httpx.HTTPError as exc:
             return HttpResult(None, f"http: {type(exc).__name__}")
         return HttpResult(response.status_code)

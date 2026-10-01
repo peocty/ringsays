@@ -81,6 +81,9 @@ def main() -> None:
         log.warning("worker running with MOCK push, broker and webhook sender")
         publisher: outbox.Publisher = outbox.MockPublisher()
         sender: webhooks.HttpSender = webhooks.MockHttpSender()
+        if settings.environment == "local":
+            log.warning("webhooks to this machine (127.0.0.1, localhost) are really sent; others MOCK")
+            sender = webhooks.LoopbackHttpSender(sender)
     else:
         publisher = outbox.NatsPublisher(settings.nats_url)
         sender = webhooks.HttpxSender()

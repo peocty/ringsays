@@ -21,7 +21,7 @@ from app.platform import idempotency
 
 from . import service
 from .domain import Intent
-from .schemas import IntentCreateIn, OutcomeIn, PurposeCodeIn, intent_out
+from .schemas import IntentCreateIn, OutcomeIn, PurposeCodeIn, ScheduleIn, intent_out
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["Enterprise"])
@@ -133,6 +133,19 @@ def signal_calling(intent_id: UUID, p: Writer, key: IdemKey, now: Now) -> JSONRe
         202,
         lambda c: service.signal_calling(c, intent_id, p.actor, now),
         after_commit=push,
+    )
+
+
+@router.post("/intents/{intent_id}/schedule")
+def schedule_intent(intent_id: UUID, body: ScheduleIn, p: Writer, key: IdemKey, now: Now) -> JSONResponse:
+    return _transition_route(
+        p,
+        key,
+        intent_id,
+        "schedule",
+        200,
+        lambda c: service.schedule(c, intent_id, body.slot.to_domain(), p.actor, now),
+        body.model_dump(mode="json"),
     )
 
 

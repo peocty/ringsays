@@ -171,6 +171,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Seed MOCK demo data (local only).")
     parser.add_argument("--tag", help="Add +tag to every demo email, for an isolated run (browser tests)")
     parser.add_argument("--json", action="store_true", help="Print result as JSON")
+    parser.add_argument(
+        "--webhook-url", help="Register a webhook endpoint for all events (loopback http allowed locally)"
+    )
     args = parser.parse_args()
     if settings.environment != "local":
         raise SystemExit("seed is for local development only")
@@ -185,6 +188,16 @@ def main() -> None:
         tagged = _tagged(email, args.tag)
         seed_staff(engine, tagged, roles, name)
         people[roles[0]] = tagged
+    webhook: dict[str, str] = {}
+    if args.webhook_url:
+        from app.core.db import tenant_tx
+        from app.modules.webhooks import service as webhooks
+
+        with tenant_tx(seeded.tenant_id) as conn:
+            endpoint_id, secret = webhooks.create_endpoint(
+                conn, seeded.tenant_id, args.webhook_url, sorted(webhooks.ALL_EVENTS)
+            )
+        webhook = {"webhook_endpoint_id": str(endpoint_id), "webhook_secret": secret}
     if args.json:
         print(
             json.dumps(
@@ -194,6 +207,7 @@ def main() -> None:
                     "client_secret": seeded.client_secret,
                     "agent_id": seeded.agent_id,
                     "people": people,
+                    **webhook,
                 }
             )
         )
@@ -203,6 +217,8 @@ def main() -> None:
     print(f"client_secret={seeded.client_secret}  (shown once)")
     print("Portal sign in (MOCK issuer): " + ", ".join(e for e, *_ in DEMO_PORTAL_USERS))
     print("Back office sign in (MOCK issuer): " + ", ".join(e for e, *_ in DEMO_STAFF))
+    if webhook:
+        print(f"webhook secret={webhook['webhook_secret']}  (shown once)")
 
 
 if __name__ == "__main__":

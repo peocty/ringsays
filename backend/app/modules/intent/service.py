@@ -21,7 +21,7 @@ from app.platform import outbox, ratelimit
 
 from . import repo
 from . import state_machine as sm
-from .domain import Actor, Channel, Intent, IntentEvent, OutcomeCode
+from .domain import Actor, Channel, Intent, IntentEvent, OutcomeCode, Slot
 from .errors import RuleViolation
 from .rules import EnterpriseIntentRequest, create_enterprise_intent
 from .schemas import IntentCreateIn
@@ -58,6 +58,7 @@ def create(
         consent_ref=body.consent_ref,
         parent_intent_id=body.parent_intent_id,
         language=body.language,
+        offered_slots=tuple(x.to_domain() for x in body.offered_slots),
     )
     intent = create_enterprise_intent(req, policy, level, now)
     # Counted only once validation passed; caller holds the idempotency lock, so a retried key never counts.
@@ -108,6 +109,13 @@ def signal_calling(conn: Connection, intent_id: UUID, actor: str, now: datetime)
 def record_outcome(conn: Connection, intent_id: UUID, code: OutcomeCode, actor: str, now: datetime) -> Intent:
     return apply(
         conn, intent_id, lambda i: sm.record_outcome(i, code, Actor.CALLER, now), actor, "intent.outcome", now
+    )
+
+
+def schedule(conn: Connection, intent_id: UUID, slot: Slot, actor: str, now: datetime) -> Intent:
+    """Organisation picks one of the times the customer proposed."""
+    return apply(
+        conn, intent_id, lambda i: sm.caller_accept_slot(i, slot, now), actor, "intent.schedule", now
     )
 
 

@@ -6,9 +6,9 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from .domain import Channel, Intent, OutcomeCode, Priority
+from .domain import Channel, Intent, OutcomeCode, Priority, Slot
 
 E164 = Annotated[str, StringConstraints(pattern=r"^\+[1-9]\d{6,14}$")]
 PurposeCodeStr = Annotated[str, StringConstraints(pattern=r"^[A-Z0-9]+(\.[A-Z0-9]+){1,4}$")]
@@ -21,6 +21,26 @@ class Strict(BaseModel):
 
 class Recipient(Strict):
     phone: E164
+
+
+class SlotIn(Strict):
+    start: datetime
+    end: datetime
+
+    @model_validator(mode="after")
+    def _ordered(self) -> SlotIn:
+        if self.start.tzinfo is None or self.end.tzinfo is None:
+            raise ValueError("slot times need a time zone")
+        if self.end <= self.start:
+            raise ValueError("slot end must be after start")
+        return self
+
+    def to_domain(self) -> Slot:
+        return Slot(start=self.start, end=self.end)
+
+
+class ScheduleIn(Strict):
+    slot: SlotIn
 
 
 class IntentCreateIn(Strict):
@@ -42,6 +62,7 @@ class IntentCreateIn(Strict):
     consent_ref: Annotated[str, StringConstraints(max_length=128)] | None = None
     parent_intent_id: UUID | None = None
     language: Literal["en", "ar"] = "ar"
+    offered_slots: Annotated[list[SlotIn], Field(max_length=5)] = []
 
 
 class OutcomeIn(Strict):
@@ -98,6 +119,7 @@ def intent_out(i: Intent) -> dict[str, Any]:
         "valid_until": i.valid_until.isoformat(),
         "status": i.status.value,
         "scheduled_slot": _slot(i.scheduled_slot),
+        "proposed_slots": [_slot(x) for x in i.proposed_slots],
         "created_at": i.created_at.isoformat(),
         "updated_at": i.updated_at.isoformat(),
         "timeline": [

@@ -124,6 +124,38 @@ paths:
         "409": { $ref: "./common.yaml#/components/responses/Conflict" }
         "410": { $ref: "./common.yaml#/components/responses/Gone" }
 
+  /intents/{intent_id}/schedule:
+    post:
+      tags: [Intents]
+      operationId: scheduleIntent
+      summary: Accept one of the times the customer proposed
+      description: Allowed while the intent is RESCHEDULED; slot must equal one of `proposed_slots`.
+      security:
+        - oauth2: [intents:write]
+      parameters:
+        - $ref: "./common.yaml#/components/parameters/IntentId"
+        - $ref: "./common.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [slot]
+              properties:
+                slot: { $ref: "./common.yaml#/components/schemas/Slot" }
+      responses:
+        "200":
+          description: Intent scheduled.
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/Intent"
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+        "422": { $ref: "./common.yaml#/components/responses/UnprocessableEntity" }
+
   /intents/{intent_id}/outcome:
     post:
       tags: [Intents]
@@ -272,6 +304,11 @@ components:
         consent_ref: { type: string, maxLength: 128 }
         parent_intent_id: { type: string, format: uuid }
         language: { type: string, enum: [en, ar], default: ar }
+        offered_slots:
+          type: array
+          maxItems: 5
+          description: Times the organisation can call; the customer may pick one (SCHEDULE).
+          items: { $ref: "./common.yaml#/components/schemas/Slot" }
 
     IntentCreated:
       type: object

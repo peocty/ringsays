@@ -291,6 +291,10 @@ components:
           oneOf:
             - { $ref: "#/components/schemas/Slot" }
             - { type: "null" }
+        proposed_slots:
+          type: array
+          description: Open times. Offered by the organisation (DELIVERED) or proposed by the customer (RESCHEDULED).
+          items: { $ref: "#/components/schemas/Slot" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         timeline:
