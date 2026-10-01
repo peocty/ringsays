@@ -5,6 +5,8 @@ from __future__ import annotations
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LOCAL_JWT_SECRET = "local-development-only-secret-change-me-0123456789"  # noqa: S105
+LOCAL_WEBHOOK_KEY = "bG9jYWwtZGV2LW9ubHktd2ViaG9vay1rZXktMDAwMDA="  # Fernet key, local only
+LOCAL_PHONE_PEPPER = "local-dev-only-pepper"
 
 
 class Settings(BaseSettings):
@@ -29,9 +31,28 @@ class Settings(BaseSettings):
     jwt_issuer: str = "https://auth.ringsays.local"
     access_token_ttl_s: int = 900
 
+    # Encrypts webhook secrets at rest. Production: key from KMS, rotated.
+    webhook_secret_key: str = LOCAL_WEBHOOK_KEY
+    # Keyed hash for phone numbers in Redis counters, so Redis never holds a phone number.
+    phone_pepper: str = LOCAL_PHONE_PEPPER
+
+    # Rate limits and contact policy (per tenant defaults; tenant overrides come with admin API).
+    tenant_creates_per_minute: int = 600
+    tenant_urgent_per_day: int = 50
+    recipient_intents_per_tenant_per_day: int = 3
+
     def assert_safe_for_environment(self) -> None:
-        if self.environment != "local" and self.jwt_secret == LOCAL_JWT_SECRET:
-            raise RuntimeError("RINGSAYS_JWT_SECRET must be set outside local environment")
+        if self.environment == "local":
+            return
+        for name, value, default in [
+            ("RINGSAYS_JWT_SECRET", self.jwt_secret, LOCAL_JWT_SECRET),
+            ("RINGSAYS_WEBHOOK_SECRET_KEY", self.webhook_secret_key, LOCAL_WEBHOOK_KEY),
+            ("RINGSAYS_PHONE_PEPPER", self.phone_pepper, LOCAL_PHONE_PEPPER),
+        ]:
+            if value == default:
+                raise RuntimeError(f"{name} must be set outside local environment")
+        if self.environment == "production" and self.use_mock_adapters:
+            raise RuntimeError("mock adapters are not allowed in production")
 
 
 settings = Settings()

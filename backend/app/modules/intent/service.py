@@ -14,8 +14,10 @@ from sqlalchemy import Connection
 
 from app.core.ids import uuid7
 from app.modules.audit import service as audit
+from app.modules.context import service as context
 from app.modules.enterprise import service as enterprise
-from app.platform import outbox
+from app.modules.webhooks import service as webhooks
+from app.platform import outbox, ratelimit
 
 from . import repo
 from . import state_machine as sm
@@ -25,7 +27,10 @@ from .rules import EnterpriseIntentRequest, create_enterprise_intent
 from .schemas import IntentCreateIn
 
 
-def create(conn: Connection, tenant_id: UUID, body: IntentCreateIn, actor: str, now: datetime) -> Intent:
+def create(
+    conn: Connection, tenant_id: UUID, body: IntentCreateIn, actor: str, now: datetime
+) -> tuple[Intent, str | None]:
+    """Create intent. Returns (intent, context_token); token only when SDK channel was requested."""
     agent = enterprise.get_agent(conn, body.agent_id)
     if body.department_id is not None and body.department_id != agent.department_id:
         raise RuleViolation("department_id must match the agent's department")
@@ -55,6 +60,8 @@ def create(conn: Connection, tenant_id: UUID, body: IntentCreateIn, actor: str, 
         language=body.language,
     )
     intent = create_enterprise_intent(req, policy, level, now)
+    # Counted only once validation passed; caller holds the idempotency lock, so a retried key never counts.
+    ratelimit.get_limiter().check_create(tenant_id, body.priority, body.to.phone, now)
     repo.insert_intent(conn, intent)
     outbox.enqueue(
         conn,
@@ -80,7 +87,8 @@ def create(conn: Connection, tenant_id: UUID, body: IntentCreateIn, actor: str, 
         object_id=str(intent.intent_id),
         at=now,
     )
-    return intent
+    token = context.issue(conn, intent, now) if Channel.SDK in intent.preferred_channels else None
+    return intent, token
 
 
 def get(conn: Connection, intent_id: UUID) -> Intent:
@@ -93,7 +101,7 @@ def cancel(conn: Connection, intent_id: UUID, actor: str, now: datetime) -> Inte
 
 
 def signal_calling(conn: Connection, intent_id: UUID, actor: str, now: datetime) -> Intent:
-    """Agent is dialling. Delivery of pre call push is wired in stage 3; here intent moves IN_PROGRESS."""
+    """Agent is dialling: intent moves IN_PROGRESS. API layer sends best effort pre call push first."""
     return apply(conn, intent_id, lambda i: sm.start_call(i, now), actor, "intent.calling", now)
 
 
@@ -127,9 +135,14 @@ def apply(
 ) -> Intent:
     before, version = repo.load(conn, intent_id, for_update=True)
     after = fn(before)
+    if after is before:
+        return before
     repo.save(conn, before, after, version)
     for event in after.timeline[len(before.timeline) :]:
         _publish_status_change(conn, after, event, now)
+        webhooks.enqueue_for_event(conn, after, event, now)
+    if after.is_terminal:
+        context.revoke_for_intent(conn, after.intent_id, now)
     audit.append(
         conn,
         tenant_id=after.tenant_id,

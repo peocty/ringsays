@@ -40,7 +40,7 @@ def request_() -> EnterpriseIntentRequest:
         purpose_code="MORTGAGE.DOC.CLARIFY",
         priority=Priority.NORMAL,
         expected_duration_min=5,
-        valid_from=NOW + timedelta(minutes=30),
+        valid_from=NOW,
         valid_until=NOW + timedelta(minutes=60),
         channel_preference=(Channel.SDK, Channel.PRECALL_PUSH, Channel.PSTN),
         masked_reference="8291",

@@ -113,6 +113,7 @@ intents = Table(
     Column("version", Integer, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
+    Column("delivery_next_check_at", DateTime(timezone=True)),
     schema="intent",
 )
 
@@ -175,4 +176,65 @@ audit_events = Table(
     Column("prev_hash", Text, nullable=False),
     Column("hash", Text, nullable=False),
     schema="audit",
+)
+
+context_tokens = Table(
+    "context_tokens",
+    metadata,
+    Column("token_hash", Text, primary_key=True),
+    Column("tenant_id", UUID(as_uuid=True), nullable=False),
+    Column("intent_id", UUID(as_uuid=True), nullable=False),
+    Column("device_id", UUID(as_uuid=True)),
+    Column("issued_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("resolve_count", Integer, nullable=False),
+    Column("revoked_at", DateTime(timezone=True)),
+    schema="context",
+)
+
+delivery_attempts = Table(
+    "delivery_attempts",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("tenant_id", UUID(as_uuid=True)),
+    Column("intent_id", UUID(as_uuid=True), nullable=False),
+    Column("channel", Text, nullable=False),
+    Column("outcome", Text, nullable=False),
+    Column("reason", Text),
+    Column("hold_until", DateTime(timezone=True)),
+    Column("at", DateTime(timezone=True), nullable=False),
+    schema="intent",
+)
+
+webhook_endpoints = Table(
+    "webhook_endpoints",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("tenant_id", UUID(as_uuid=True), nullable=False),
+    Column("url", Text, nullable=False),
+    Column("secret_ciphertext", Text, nullable=False),
+    Column("events", ARRAY(Text), nullable=False),
+    Column("active", Boolean, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    schema="enterprise",
+)
+
+webhook_deliveries = Table(
+    "webhook_deliveries",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("tenant_id", UUID(as_uuid=True), nullable=False),
+    Column("endpoint_id", UUID(as_uuid=True), nullable=False),
+    Column("event_id", UUID(as_uuid=True), nullable=False),
+    Column("event_type", Text, nullable=False),
+    Column("intent_id", UUID(as_uuid=True), nullable=False),
+    Column("payload", JSONB, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("attempts", Integer, nullable=False),
+    Column("next_attempt_at", DateTime(timezone=True), nullable=False),
+    Column("last_status_code", Integer),
+    Column("last_error", Text),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("delivered_at", DateTime(timezone=True)),
+    schema="platform",
 )

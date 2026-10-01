@@ -52,6 +52,9 @@ curl -X POST localhost:8000/v1/intents -H "Authorization: Bearer <token>" \
 
 API health: http://localhost:8000/health
 
+Background jobs (delivery, expiry, outbox relay, webhooks): `cd backend && .venv/bin/python -m app.worker`.
+In local environment the worker uses MOCK push, directory, broker and webhook sender and says so in its log.
+
 ## Rules for contributors
 
 - Change a contract first, then code. Parity tests fail on any drift.

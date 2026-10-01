@@ -262,3 +262,19 @@ def test_full_happy_path_timeline(requested: Intent, now: datetime) -> None:
         S.IN_PROGRESS,
         S.COMPLETED,
     ]
+
+
+def test_pstn_fallback_allows_direct_call(requested: Intent, now: datetime) -> None:
+    pstn = sm.mark_delivered(requested, now, Channel.PSTN)
+    assert sm.start_call(pstn, now).status is S.IN_PROGRESS
+
+
+def test_digital_delivery_requires_receiver_agreement(requested: Intent, now: datetime) -> None:
+    sdk = sm.mark_delivered(requested, now, Channel.SDK)
+    with pytest.raises(RuleViolation, match="not agreed"):
+        sm.start_call(sdk, now)
+
+
+def test_cannot_deliver_before_window_opens(requested: Intent) -> None:
+    with pytest.raises(RuleViolation, match="not opened"):
+        sm.mark_delivered(requested, requested.valid_from - timedelta(seconds=1), Channel.SDK)

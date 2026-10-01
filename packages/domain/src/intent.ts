@@ -82,6 +82,7 @@ export const TRANSITIONS: readonly Transition[] = [
   { from: "DELIVERED", to: "DECLINED", actors: ["RECEIVER"] },
   { from: "DELIVERED", to: "EXPIRED", actors: ["SYSTEM"] },
   { from: "DELIVERED", to: "CANCELLED", actors: ["CALLER"] },
+  { from: "DELIVERED", to: "IN_PROGRESS", actors: ["SYSTEM"] }, // PSTN fallback only, ADR 0008
   { from: "ACCEPTED", to: "IN_PROGRESS", actors: ["SYSTEM"] },
   { from: "ACCEPTED", to: "EXPIRED", actors: ["SYSTEM"] },
   { from: "ACCEPTED", to: "CANCELLED", actors: ["CALLER"] },

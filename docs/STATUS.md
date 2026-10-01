@@ -65,12 +65,47 @@ Areas reviewer found clean: transaction scoped tenant setting, idempotency under
 
 Contract fix found by conformance tests: `PurposeCode` response schema inherited `additionalProperties: false` from create schema, which would have rejected valid responses. Split into `PurposeCodeFields`.
 
+## Stage 3 (2026-10-01)
+
+| Area | Item | Status |
+| --- | --- | --- |
+| Delivery | Fallback ladder SDK, pre call push, PSTN (ADR 0008), with attempt trail per intent | Done, tested here with MOCK push and directory |
+| Delivery | Receiver rules: verified only, quiet hours across midnight in receiver timezone, window rules, duration rules | Done, tested here |
+| Delivery | URGENT from verified organisations passes quiet hours; quiet hours past validity skip app delivery | Done, tested here |
+| Delivery | Pushes carry intent id and kind only; sent outside transactions with a lease | Done, tested here |
+| Context Tokens | 128 bit token shown once, SHA-256 stored, first device binds, revoked at end, expires with intent | Done, tested here |
+| Webhooks | Queued in same transaction, HMAC signed, ordered per intent, backoff 30 s to 1 h for 24 h, dead letter, replay | Done, tested here with MOCK HTTP sender |
+| Webhooks | Secrets encrypted at rest (Fernet; KMS key in production), SSRF guard with pinned IP and SNI | Done; real HTTP sender not run here (no egress) |
+| Limits | Per tenant creates per minute, URGENT per day, per recipient per tenant per day; atomic Redis script | Done, tested here on Redis |
+| Limits | Redis outage: fail open for normal intents, fail closed (503) for URGENT | Done, tested here |
+| Worker | `python -m app.worker` running delivery, expiry, outbox relay and webhooks, each job isolated | Done, tested here |
+
+Test count: 617 backend tests, 15 TypeScript tests.
+
+### Independent review (stage 3)
+
+| # | Defect | Fix |
+| --- | --- | --- |
+| 1 | Token resolve: NULL device bypassed binding; function executable by every role; caller clock could revive expired tokens | NULL refused, execute revoked from PUBLIC, effective time never earlier than database time |
+| 2 | Calling now push sent even when call was refused, and ignored receiver rules | Push only after committed transition, receiver rules applied, never on replay |
+| 3 | One bad row (for example bad timezone) stopped every job for every tenant | Per item and per job isolation; error recorded with 5 minute backoff |
+| 4 | Waiting or exhausted intents could starve due ones | `delivery_next_check_at` scheduling |
+| 5 | SDK resolve delivered before window opened | Delivery refused before `valid_from`; early resolve delivered when window opens |
+| 6 | Rejected or concurrent duplicate requests consumed rate limits | Limits counted after validation under idempotency lock |
+| 7 | Slow tenant endpoint held locks and made signatures stale | Lease then send outside transaction; signed at send time; 20 sends per endpoint per run |
+| 8 | SSRF guard missed NAT64, IPv4 compatible and other embedded forms; any port | Embedded IPv4 unwrapped, port 443 only, connection pinned to checked address |
+| 9 | Push could repeat after a failed commit; SDK resolve raced worker | Two phase push with lease; SDK resolve locks intent |
+
+Also raised: limiter failing open removed the URGENT cap. Now URGENT fails closed.
+
 ## Known gaps
 
 - Foundation doc section H transition table predates ADR 0004 refinements.
 - Several list endpoints lack a 4XX response in contracts (lint warnings).
-- `POST /intents/{id}/calling` moves intent straight to IN_PROGRESS; stage 3 adds pre call push before that.
-- Webhook delivery to tenants is not yet built, so tenants must poll `GET /intents/{id}` until stage 3.
+- Webhook endpoint registration and replay have service functions but no HTTP route yet; admin API arrives with the portal (stage 5).
+- Recipient directory is MOCK until client API and identity (stage 4).
+- Tenant sector is fixed to BANK for receiver rules until admin API sets it per tenant.
+- A Context Token replayed through idempotency comes back null (shown once); a re-issue endpoint is needed.
 - Audit chain heads must be exported to write once storage by an operations job; export target not built.
-- Client status cache is per process (30 s); a shared Redis cache comes with rate limits in stage 3.
+- Client status cache is per process (30 s); move to Redis when more than one API instance runs.
 - Python 3.11 used in build workspace; Dockerfile and CI use 3.12. Code targets 3.11 or later.

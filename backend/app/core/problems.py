@@ -48,7 +48,9 @@ def problem(
 def install(app: FastAPI) -> None:
     @app.exception_handler(IntentError)
     async def _intent_error(_: Request, exc: IntentError) -> JSONResponse:
-        return problem(exc.http_status, exc.code, exc.detail)
+        retry = getattr(exc, "retry_after_s", None)
+        headers = {"Retry-After": str(retry)} if retry is not None else None
+        return problem(exc.http_status, exc.code, exc.detail, headers=headers)
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:

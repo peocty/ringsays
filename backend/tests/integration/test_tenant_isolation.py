@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC
 from uuid import UUID, uuid4
 
 import pytest
@@ -14,6 +15,8 @@ from app.core.tables import (
     agents,
     audit_events,
     calling_numbers,
+    context_tokens,
+    delivery_attempts,
     departments,
     idempotency_keys,
     intent_events,
@@ -21,6 +24,8 @@ from app.core.tables import (
     outbox,
     purpose_codes,
     tenants,
+    webhook_deliveries,
+    webhook_endpoints,
 )
 from app.scripts.seed import SeededTenant
 
@@ -37,14 +42,34 @@ TENANT_TABLES: list[Table] = [
     intent_events,
     idempotency_keys,
     audit_events,
+    delivery_attempts,
+    webhook_endpoints,
+    webhook_deliveries,
+    context_tokens,
 ]
 
 
 @pytest.fixture
 def a_intent(client: TestClient, tenant: SeededTenant) -> UUID:
+    """Tenant A intent with token, webhook endpoint, delivery attempt and queued webhook."""
+    from datetime import datetime
+
+    from app.modules.delivery import service as delivery
+    from app.modules.delivery.adapters import MockPushSender, MockRecipientDirectory
+    from app.modules.webhooks import service as webhooks
+
+    with tenant_tx(tenant.tenant_id) as conn:
+        webhooks.create_endpoint(conn, tenant.tenant_id, "https://hooks.example.com/a", ["intent.delivered"])
     tok = token_for(client, tenant)
-    r = client.post("/v1/intents", json=intent_body(tenant), headers=auth(tok, str(uuid4())))
+    r = client.post(
+        "/v1/intents",
+        json=intent_body(tenant, channel_preference=["SDK", "PSTN"]),
+        headers=auth(tok, str(uuid4())),
+    )
     assert r.status_code == 201
+    opens = datetime(2026, 10, 4, 7, 30, tzinfo=UTC)
+    delivery.deliver_due(opens, MockRecipientDirectory(), MockPushSender())
+    delivery.deliver_due(opens + delivery.SDK_GRACE, MockRecipientDirectory(), MockPushSender())
     return UUID(r.json()["intent_id"])
 
 

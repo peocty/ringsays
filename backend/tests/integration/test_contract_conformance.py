@@ -63,8 +63,10 @@ def test_lifecycle_responses_match_contract(
 
     _check(openapi, "GET", f"/intents/{intent_id}", client.get(f"/v1/intents/{intent_id}", headers=auth(tok)))
 
+    from datetime import timedelta
+
     with tenant_tx(tenant.tenant_id) as conn:
-        service.mark_delivered(conn, intent_id, Channel.SDK, clock.now)
+        service.mark_delivered(conn, intent_id, Channel.SDK, clock.now + timedelta(minutes=30))
     r = client.post(f"/v1/intents/{intent_id}/cancel", headers=auth(tok, str(uuid4())))
     _check(openapi, "POST", f"/intents/{intent_id}/cancel", r)
 

@@ -151,3 +151,35 @@ def intent_body(t: SeededTenant, **overrides: Any) -> dict[str, Any]:
     }
     body.update(overrides)
     return body
+
+
+@pytest.fixture(autouse=True)
+def _isolated_limits_and_adapters() -> Iterator[None]:
+    """Fresh Redis test database and MOCK adapters per test; generous limits unless a test lowers them."""
+    import redis as redis_lib
+
+    from app.core import auth as auth_mod
+    from app.modules.delivery import adapters
+    from app.platform import ratelimit
+
+    client = redis_lib.Redis.from_url("redis://127.0.0.1:6379/15", socket_timeout=0.5)
+    try:
+        client.flushdb()
+    except redis_lib.RedisError:
+        pass
+    ratelimit.set_limiter(ratelimit.Limiter(client))
+    saved = (
+        settings.recipient_intents_per_tenant_per_day,
+        settings.tenant_urgent_per_day,
+        settings.tenant_creates_per_minute,
+    )
+    settings.recipient_intents_per_tenant_per_day = 1000
+    adapters.configure(adapters.MockRecipientDirectory(), adapters.MockPushSender())
+    auth_mod.clear_client_status_cache()
+    yield
+    (
+        settings.recipient_intents_per_tenant_per_day,
+        settings.tenant_urgent_per_day,
+        settings.tenant_creates_per_minute,
+    ) = saved
+    ratelimit.set_limiter(None)

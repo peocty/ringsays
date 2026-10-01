@@ -112,7 +112,15 @@ def _from_row(r: Row[Any], events: list[IntentEvent]) -> Intent:
 
 
 def insert_intent(conn: Connection, i: Intent) -> None:
-    conn.execute(insert(intents).values(id=i.intent_id, created_at=i.created_at, version=1, **_row_values(i)))
+    conn.execute(
+        insert(intents).values(
+            id=i.intent_id,
+            created_at=i.created_at,
+            version=1,
+            delivery_next_check_at=i.valid_from,
+            **_row_values(i),
+        )
+    )
     _insert_events(conn, i, i.timeline)
 
 

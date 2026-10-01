@@ -339,7 +339,6 @@ components:
             - intent.declined
             - intent.expired
             - intent.cancelled
-            - slot.proposed
             - outcome.recorded
         occurred_at: { type: string, format: date-time }
         intent_id: { $ref: "./common.yaml#/components/schemas/IntentId" }
@@ -349,9 +348,14 @@ components:
             - { $ref: "./common.yaml#/components/schemas/Channel" }
             - { type: "null" }
         slot:
+          description: Agreed slot, for intent.scheduled.
           oneOf:
             - { $ref: "./common.yaml#/components/schemas/Slot" }
             - { type: "null" }
+        proposed_slots:
+          description: Slots proposed by receiver, for intent.rescheduled. Caller picks one.
+          type: array
+          items: { $ref: "./common.yaml#/components/schemas/Slot" }
         decline_reason:
           oneOf:
             - { $ref: "./common.yaml#/components/schemas/DeclineReason" }

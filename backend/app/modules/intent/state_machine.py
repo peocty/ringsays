@@ -43,6 +43,8 @@ TRANSITIONS: dict[tuple[IntentStatus, IntentStatus], frozenset[Actor]] = {
     (S.DELIVERED, S.DECLINED): frozenset({A.RECEIVER}),
     (S.DELIVERED, S.EXPIRED): frozenset({A.SYSTEM}),
     (S.DELIVERED, S.CANCELLED): frozenset({A.CALLER}),
+    # PSTN fallback only (ADR 0008): no digital channel reached receiver, so agent may dial directly.
+    (S.DELIVERED, S.IN_PROGRESS): frozenset({A.SYSTEM}),
     (S.ACCEPTED, S.IN_PROGRESS): frozenset({A.SYSTEM}),
     (S.ACCEPTED, S.EXPIRED): frozenset({A.SYSTEM}),
     (S.ACCEPTED, S.CANCELLED): frozenset({A.CALLER}),
@@ -108,6 +110,8 @@ def expire_if_due(intent: Intent, now: datetime) -> Intent:
 
 def mark_delivered(intent: Intent, now: datetime, channel: Channel) -> Intent:
     _guard_not_expired(intent, now)
+    if now < intent.valid_from:
+        raise RuleViolation("intent window has not opened yet")
     return transition(intent, S.DELIVERED, A.SYSTEM, now, channel_used=channel)
 
 
@@ -214,8 +218,13 @@ def caller_accept_slot(intent: Intent, slot: Slot, now: datetime) -> Intent:
 
 
 def start_call(intent: Intent, now: datetime) -> Intent:
-    """System marks call connected. Scheduled intents may start up to 10 minutes before slot."""
+    """System marks call connected. Scheduled intents may start up to 10 minutes before slot.
+
+    A DELIVERED intent may start only when delivery fell back to PSTN (receiver could not be asked).
+    """
     _guard_not_expired(intent, now)
+    if intent.status is S.DELIVERED and intent.channel_used is not Channel.PSTN:
+        raise RuleViolation("receiver has not agreed to talk yet; wait for accept or schedule")
     if intent.status is S.SCHEDULED and intent.scheduled_slot is not None:
         if now < intent.scheduled_slot.start - timedelta(minutes=10):
             raise RuleViolation("call is more than 10 minutes before scheduled slot")

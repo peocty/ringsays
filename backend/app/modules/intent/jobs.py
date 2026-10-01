@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
+from uuid import UUID
 
 from sqlalchemy import Engine, select
 
@@ -11,6 +13,8 @@ from app.core.tables import intents
 
 from . import repo, service
 from . import state_machine as sm
+
+log = logging.getLogger(__name__)
 
 
 def expire_due(now: datetime, batch: int = 500, engine: Engine | None = None) -> int:
@@ -34,12 +38,19 @@ def expire_due(now: datetime, batch: int = 500, engine: Engine | None = None) ->
         )
     expired = 0
     for intent_id in ids:
-        with worker_tx(engine) as conn:
-            current, _ = repo.load(conn, intent_id, for_update=True)
-            if not sm.is_expired(current, now):
-                continue  # changed by an API call since candidates were read
-            service.apply(
-                conn, intent_id, lambda i: sm.expire_if_due(i, now), "system:expiry", "intent.expire", now
-            )
-            expired += 1
+        try:
+            expired += _expire_one(intent_id, now, engine)
+        except Exception as exc:
+            log.error("expiry failed for intent %s: %s", intent_id, type(exc).__name__)
     return expired
+
+
+def _expire_one(intent_id: UUID, now: datetime, engine: Engine | None) -> int:
+    with worker_tx(engine) as conn:
+        current, _ = repo.load(conn, intent_id, for_update=True)
+        if not sm.is_expired(current, now):
+            return 0  # changed by an API call since candidates were read
+        service.apply(
+            conn, intent_id, lambda i: sm.expire_if_due(i, now), "system:expiry", "intent.expire", now
+        )
+        return 1

@@ -142,7 +142,9 @@ def test_idempotency_replay_and_mismatch(client: TestClient, tenant: SeededTenan
     first = client.post("/v1/intents", json=intent_body(tenant), headers=auth(tok, key))
     again = client.post("/v1/intents", json=intent_body(tenant), headers=auth(tok, key))
     assert first.status_code == 201 and again.status_code == 200
-    assert first.json() == again.json()
+    assert first.json()["context_token"], "SDK channel requested, token issued"
+    assert again.json()["context_token"] is None, "token is shown once and never stored"
+    assert {**first.json(), "context_token": None} == again.json()
     changed = client.post("/v1/intents", json=intent_body(tenant, priority="LOW"), headers=auth(tok, key))
     assert changed.status_code == 422
     assert changed.json()["code"] == "idempotency_key_reused"
@@ -160,6 +162,7 @@ def test_missing_idempotency_key(client: TestClient, tenant: SeededTenant) -> No
 def test_full_lifecycle_with_outbox_and_audit(client: TestClient, tenant: SeededTenant, clock: Clock) -> None:
     tok = token_for(client, tenant)
     intent_id = _create(client, tenant)
+    clock.now += timedelta(minutes=30)  # window opens
     with tenant_tx(tenant.tenant_id) as conn:
         service.mark_delivered(conn, intent_id, Channel.SDK, clock.now)
         service.apply_receiver(
