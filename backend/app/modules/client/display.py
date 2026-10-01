@@ -111,6 +111,7 @@ def render(items: list[Intent], lang: str) -> list[dict[str, Any]]:
             "priority": i.priority.value,
             "expected_duration_min": i.expected_duration_min,
             "valid_until": i.valid_until.isoformat(),
+            "deadline": i.deadline.isoformat() if i.deadline else None,
             "scheduled_slot": _slot(i.scheduled_slot),
             "proposed_slots": [_slot(s) for s in i.proposed_slots],
             "created_at": i.created_at.isoformat(),

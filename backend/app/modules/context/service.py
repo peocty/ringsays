@@ -67,6 +67,20 @@ def resolve(conn: Connection, token: str, device_id: UUID, now: datetime) -> tup
     raise TokenRefused("Context token not valid for this device")
 
 
+def follow_validity(conn: Connection, intent_id: UUID, valid_until: datetime) -> int:
+    """A later agreed time (LATER, PROPOSE, SCHEDULE) extends the intent; its token lasts as long."""
+    result = conn.execute(
+        update(context_tokens)
+        .where(
+            context_tokens.c.intent_id == intent_id,
+            context_tokens.c.revoked_at.is_(None),
+            context_tokens.c.expires_at < valid_until,
+        )
+        .values(expires_at=valid_until)
+    )
+    return int(result.rowcount or 0)
+
+
 def revoke_for_intent(conn: Connection, intent_id: UUID, now: datetime) -> int:
     result = conn.execute(
         update(context_tokens)

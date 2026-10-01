@@ -62,3 +62,30 @@ def test_loopback_sender_posts_locally_and_routes_others(monkeypatch: pytest.Mon
     refused = sender.post(url, b"{}", {})
     assert refused.status is None and refused.error and "local only" in refused.error
     srv.shutdown()
+
+
+def test_loopback_needs_path_and_no_ipv6(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "environment", "local")
+    with pytest.raises(RuleViolation):
+        webhooks.validate_url("http://127.0.0.1:4100")
+    with pytest.raises(RuleViolation):
+        webhooks.validate_url("http://[::1]:4100/hook")
+
+
+def test_http_origins_refused_outside_local() -> None:
+    from app.core.config import Settings
+
+    s = Settings(
+        environment="staging",
+        jwt_secret="x" * 40,
+        webhook_secret_key="Zm9vYmFyYmF6cXV4cXV1eHF1dXhxdXV4cXV1eHF1dXg=",  # noqa: S106
+        phone_pepper="p",
+        admin_oidc_issuer="https://idp.example",
+        staff_oidc_issuer="https://staff.example",
+        backoffice_enabled=False,
+        use_mock_adapters=False,
+    )
+    with pytest.raises(RuntimeError, match="PORTAL_ORIGINS"):
+        s.assert_safe_for_environment()
+    s.portal_origins = ["https://portal.bank.example"]
+    s.assert_safe_for_environment()

@@ -26,6 +26,7 @@ from .domain import (
     VerificationLevel,
 )
 from .errors import RuleViolation
+from .state_machine import check_slot_shape
 
 MASKED_REFERENCE = re.compile(r"^[A-Za-z0-9]{3,4}$")
 MAX_VALIDITY_WINDOW = timedelta(days=7)
@@ -140,8 +141,13 @@ def _check_offered_slots(req: EnterpriseIntentRequest, now: datetime) -> None:
     slots: Sequence[Slot] = req.offered_slots
     if len(slots) > 5:
         raise RuleViolation("at most 5 offered slots")
+    if len(set(slots)) != len(slots):
+        raise RuleViolation("offered slots must be distinct")
     for s in slots:
         if s.start <= now:
             raise RuleViolation("offered slot is in the past")
+        if s.start < req.valid_from:
+            raise RuleViolation("offered slot starts before valid_from")
+        check_slot_shape(s, latest_end=req.valid_from + MAX_VALIDITY_WINDOW)
         if req.deadline is not None and s.end > req.deadline:
             raise RuleViolation("offered slot ends after deadline")

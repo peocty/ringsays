@@ -306,7 +306,7 @@ export function IntentCard({ token, onAnswered, style, now }: IntentCardProps) {
         </View>
       ) : panel === "propose" ? (
         <View style={styles.actions}>
-          {suggestedSlots(i.expected_duration_min, now).map((s) => {
+          {suggestedSlots(i.expected_duration_min, now, 3, i.deadline).map((s) => {
             const on = picked.some((p) => p.start === s.start);
             return (
               <Btn
@@ -336,7 +336,11 @@ export function IntentCard({ token, onAnswered, style, now }: IntentCardProps) {
               title={label[a]}
               primary={idx === 0}
               ghost={a === "DECLINE"}
-              disabled={sending || (a === "SCHEDULE" && openSlots(i, now).length === 0)}
+              disabled={
+                sending ||
+                (a === "SCHEDULE" && openSlots(i, now).length === 0) ||
+                (a === "PROPOSE" && suggestedSlots(i.expected_duration_min, now, 3, i.deadline).length === 0)
+              }
               onPress={() => onAction(a)}
             />
           ))}

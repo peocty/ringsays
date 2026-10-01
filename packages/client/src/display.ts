@@ -39,9 +39,10 @@ export const SUGGEST_UNTIL_HOUR = 20;
 /**
  * Up to three alternative times the receiver can propose, at least an hour from now and two hours
  * apart, each starting between 09:00 and 20:00 local time (outside that, the next morning at 09:00).
- * Each is as long as the expected call; times are aligned to the quarter hour.
+ * Each is as long as the expected call; times are aligned to the quarter hour. None ends after
+ * `deadline` (so the list can be empty: then only other answers are possible).
  */
-export function suggestedSlots(durationMin: number, now = Date.now(), count = 3): Slot[] {
+export function suggestedSlots(durationMin: number, now = Date.now(), count = 3, deadline?: string | null): Slot[] {
   const quarter = 15 * 60_000;
   const length = Math.max(durationMin, 5) * 60_000;
   const inHours = (t: number): number => {
@@ -52,8 +53,10 @@ export function suggestedSlots(durationMin: number, now = Date.now(), count = 3)
     return d.getTime();
   };
   let start = inHours(Math.ceil((now + 60 * 60_000) / quarter) * quarter);
+  const latest = deadline ? Date.parse(deadline) : Infinity;
   const out: Slot[] = [];
   for (let i = 0; i < count; i += 1) {
+    if (start + length > latest) break; // never suggest a time the intent's deadline rules out
     out.push({ start: new Date(start).toISOString(), end: new Date(start + length).toISOString() });
     start = inHours(start + 2 * 60 * 60_000);
   }

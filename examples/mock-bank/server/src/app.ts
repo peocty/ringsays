@@ -30,6 +30,8 @@ const APP_SESSION_MS = 12 * 3600_000;
 const CONSOLE_SESSION_MS = 8 * 3600_000;
 const LOGIN_WINDOW_MS = 15 * 60_000;
 const LOGIN_MAX = 5;
+/** One address may try several customers (a family on one Wi-Fi), but not spray them all. */
+const LOGIN_MAX_PER_ADDRESS = 20;
 
 export interface Deps {
   config: Config;
@@ -103,10 +105,20 @@ export function buildApp(deps: Deps): FastifyInstance {
     return catalogue.codes;
   };
 
+  // Housekeeping: expired sessions and old failure counters go away.
+  const sweep = setInterval(() => {
+    const t = now();
+    for (const [k, v] of appSessions) if (v.exp < t) appSessions.delete(k);
+    for (const [k, v] of consoleSessions) if (v.exp < t) consoleSessions.delete(k);
+    for (const [k, v] of failures) if (!v.some((x) => t - x < LOGIN_WINDOW_MS)) failures.delete(k);
+  }, 60_000);
+  sweep.unref();
+  app.addHook("onClose", async () => clearInterval(sweep));
+
   const throttled = (key: string): boolean => {
     const recent = (failures.get(key) ?? []).filter((t) => now() - t < LOGIN_WINDOW_MS);
     failures.set(key, recent);
-    return recent.length >= LOGIN_MAX;
+    return recent.length >= (key.startsWith("ip:") ? LOGIN_MAX_PER_ADDRESS : LOGIN_MAX);
   };
   const failed = (key: string) => failures.set(key, [...(failures.get(key) ?? []), now()]);
 
@@ -157,7 +169,15 @@ export function buildApp(deps: Deps): FastifyInstance {
     if (!e) return reply.code(400).send({ error: "bad payload" });
     const result = store.applyEvent(e);
     app.log.info({ event: e.type, result }, "webhook");
-    // 2xx for duplicates and unknown intents too: nothing to retry.
+    // Not ours yet (our create call has not finished storing it): ask RingSays to retry later.
+    if (result === "unknown_intent") return reply.code(503).send({ error: "unknown intent, retry" });
+    // Webhook is the signal, the API is the truth: times and validity change on these events.
+    if (result === "applied" && (e.type === "intent.scheduled" || e.type === "intent.rescheduled")) {
+      void rs.getIntent(e.intent_id).then(
+        (r) => store.applyIntent(e.intent_id, r),
+        () => undefined,
+      );
+    }
     return reply.code(204).send();
   });
 
@@ -170,6 +190,7 @@ export function buildApp(deps: Deps): FastifyInstance {
     return s.customerId;
   };
 
+  // DEMO ONLY: lets the sample app offer a customer picker. A bank never lists its customers.
   app.get("/app/customers", async () =>
     store.customers.map((c) => ({ id: c.id, name: c.name, phoneHint: `••• ${c.phone.slice(-4)}` })),
   );
@@ -178,10 +199,12 @@ export function buildApp(deps: Deps): FastifyInstance {
     const b = bodyOf<{ customerId?: unknown; pin?: unknown }>(req);
     const id = typeof b.customerId === "string" ? b.customerId : "";
     const pin = typeof b.pin === "string" ? b.pin : "";
-    if (throttled(`app:${id}`)) throw new HttpError(429, "too many attempts, try later");
     const c = store.customer(id);
+    // Per customer (PIN guessing) and per address (spraying many customers); unknown ids share one key.
+    const keys = [`app:${c ? c.id : "unknown"}`, `ip:${req.ip}`];
+    if (keys.some(throttled)) throw new HttpError(429, "too many attempts, try later");
     if (!c || !/^\d{4}$/.test(pin) || !pinMatches(pin, c.pinHash)) {
-      failed(`app:${id}`);
+      keys.forEach(failed);
       throw new HttpError(401, "customer or PIN not recognised");
     }
     const t = token();
@@ -227,14 +250,17 @@ export function buildApp(deps: Deps): FastifyInstance {
 
   app.post("/console/login", async (req, reply) => {
     const b = bodyOf<{ password?: unknown }>(req);
-    if (throttled("console")) throw new HttpError(429, "too many attempts, try later");
+    const key = `console:${req.ip}`;
+    if (throttled(key)) throw new HttpError(429, "too many attempts, try later");
     if (typeof b.password !== "string" || !sameSecret(b.password, config.consolePassword)) {
-      failed("console");
+      failed(key);
       throw new HttpError(401, "wrong password");
     }
     const t = token();
     consoleSessions.set(t, { exp: now() + CONSOLE_SESSION_MS });
-    reply.header("Set-Cookie", `mb_console=${t}; HttpOnly; SameSite=Strict; Path=/console; Max-Age=${CONSOLE_SESSION_MS / 1000}`);
+    // Secure whenever served over https (always, outside a developer's machine).
+    const secure = req.protocol === "https" ? "; Secure" : "";
+    reply.header("Set-Cookie", `mb_console=${t}; HttpOnly; SameSite=Strict; Path=/console; Max-Age=${CONSOLE_SESSION_MS / 1000}${secure}`);
     return { ok: true };
   });
 
@@ -266,9 +292,26 @@ export function buildApp(deps: Deps): FastifyInstance {
     return store.intents().map(consoleView);
   });
 
+  // One RingSays call per request id at a time (double click, retry while the first is running).
+  const inFlight = new Map<string, Promise<ReturnType<typeof consoleView>>>();
+
   app.post("/console/api/intents", async (req) => {
     requireConsole(req);
+    const id = String(bodyOf<{ requestId: unknown }>(req).requestId ?? "");
+    const running = inFlight.get(id);
+    if (running) return running;
+    const work = createFromConsole(req).finally(() => inFlight.delete(id));
+    inFlight.set(id, work);
+    return work;
+  });
+
+  async function createFromConsole(req: FastifyRequest) {
     const b = bodyOf<Record<string, unknown>>(req);
+    // The console sends one request id per form; a repeated click or retry reuses it.
+    const requestId = String(b.requestId ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) throw new HttpError(400, "requestId must be a UUID");
+    const existing = store.byRequest(requestId);
+    if (existing) return consoleView(existing);
     const c = store.customer(String(b.customerId ?? ""));
     if (!c) throw new HttpError(400, "unknown customer");
     const code = (await codes()).find((x) => x.code === b.purposeCode);
@@ -302,8 +345,11 @@ export function buildApp(deps: Deps): FastifyInstance {
       language: c.language,
       ...(ref ? { masked_reference: ref } : {}),
       ...(offered.length ? { offered_slots: offered } : {}),
-    });
+    }, requestId);
+    const known = store.intent(created.intent_id);
+    if (known) return consoleView(known); // replay of an earlier send that we already stored
     const record: BankIntent = {
+      requestId,
       intentId: created.intent_id,
       customerId: c.id,
       purposeCode: code.code,
@@ -324,7 +370,7 @@ export function buildApp(deps: Deps): FastifyInstance {
     };
     store.add(record);
     return consoleView(record);
-  });
+  }
 
   const withIntent = (req: FastifyRequest): BankIntent => {
     requireConsole(req);

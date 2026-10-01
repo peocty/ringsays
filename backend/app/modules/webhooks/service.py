@@ -114,7 +114,7 @@ def is_public_address(raw: str) -> bool:
     return bool(ip.is_global)
 
 
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost"})
 
 
 def is_loopback_url(url: str) -> bool:
@@ -128,6 +128,8 @@ def validate_url(url: str) -> None:
     if settings.environment == "local" and is_loopback_url(url):
         if parts.username or parts.password:
             raise RuleViolation("webhook url must not contain credentials")
+        if not parts.path.startswith("/"):
+            raise RuleViolation("webhook url needs a path, for example /webhooks/ringsays")
         return
     if parts.scheme != "https" or not parts.hostname:
         raise RuleViolation("webhook url must be https with a host name")

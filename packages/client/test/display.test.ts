@@ -81,3 +81,12 @@ describe("suggested times stay in working hours (phone's time zone)", () => {
     expect(hour(suggestedSlots(5, Date.parse("2026-10-01T05:00:00+03:00"))[0]!.start)).toBe(9);
   });
 });
+
+it("suggestions respect the intent deadline", () => {
+  const now = Date.parse("2026-10-04T10:07:00Z");
+  expect(suggestedSlots(10, now, 3, "2026-10-04T13:30:00Z").map((x) => x.start)).toEqual([
+    "2026-10-04T11:15:00.000Z",
+    "2026-10-04T13:15:00.000Z",
+  ]);
+  expect(suggestedSlots(10, now, 3, "2026-10-04T10:30:00Z")).toEqual([]);
+});

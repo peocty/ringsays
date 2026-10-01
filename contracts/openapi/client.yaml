@@ -404,6 +404,10 @@ components:
         intent_id: { $ref: "./common.yaml#/components/schemas/IntentId" }
         status: { $ref: "./common.yaml#/components/schemas/IntentStatus" }
         created_at: { type: string, format: date-time }
+        deadline:
+          type: [string, "null"]
+          format: date-time
+          description: Latest end of any time the receiver proposes or picks.
         scheduled_slot:
           oneOf:
             - { $ref: "./common.yaml#/components/schemas/Slot" }

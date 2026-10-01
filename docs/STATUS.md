@@ -233,6 +233,43 @@ Test count: 725 backend tests, 15 domain, 20 client, 10 app unit, 13 SDK, 27 por
 | 14 | One device key across accounts on a phone | New key after every sign out |
 | 15 | Native right to left mixed with app language | Native RTL off; direction from app language |
 
+## Stage 7 (2026-10-02)
+
+| Area | Item | Status |
+| --- | --- | --- |
+| API | Organisation offered times on create (`offered_slots`); customer picks one (SCHEDULE) | Done, tested here |
+| API | `POST /v1/intents/{id}/schedule`: organisation confirms a time the customer suggested | Done, tested here |
+| API | Slot rules: at most 120 minutes, at most 7 days ahead, distinct, not before window | Done, tested here |
+| API | Context Token lasts as long as the agreed time (LATER, PROPOSE, SCHEDULE extend it) | Done, tested here |
+| API | `deadline` in intent display; suggested times never pass it; within 09:00 to 20:00 on the customer's clock | Done, tested here |
+| API | Webhooks to a receiver on the same machine (http, loopback) in local environment only | Done, tested here (real HTTP delivery) |
+| API | Outside local: http portal origins refused at start; CORS allows `RingSays-Device-Id` | Done, tested here |
+| Mock Bank | Server: OAuth, idempotent calls, signed webhook receiver, agent console, bank app API | Done, tested here |
+| Mock Bank | Customer app (Expo) with SDK `IntentCard`, Arabic and English | Done, tested here (web build); needs device testing |
+| Mock Bank | Integration guide for bank teams (`examples/mock-bank/README.md`) | Done |
+
+Test count: 736 backend tests, 15 domain, 24 client, 10 app unit, 13 SDK, 14 bank server, 3 bank app, 27 portal unit;
+browser tests: 12 portal, 6 app, 4 mock bank (console, app, API and webhooks together).
+
+### Independent review (stage 7)
+
+| # | Defect | Fix |
+| --- | --- | --- |
+| 1 | Offered times had no length or horizon limit: one slot years ahead kept an intent callable | Slots at most 120 minutes, at most 7 days ahead, distinct, not before window; same for customer proposals |
+| 2 | Context Token expired at the original window even after a later time was agreed | Token expiry follows the intent's extended validity |
+| 3 | Bank answered 204 to webhooks for intents not stored yet, losing them | 503, so RingSays retries |
+| 4 | New idempotency key per call, no time limit: lost response could create a second intent | Key per bank operation reused on retry; console request id; 10 s limit; one safe retry |
+| 5 | Rescheduled intent kept the old scheduled time in the bank's record | Cleared on reschedule; times reread from API |
+| 6 | Global console lockout; unbounded throttle and session maps; customer listing | Per address and per account limits, periodic cleanup, listing marked demo only |
+| 7 | Loopback rule mismatched database check (IPv6, case, no path) | One rule: 127.0.0.1 or localhost with a path; check case insensitive; downgrade works under RLS |
+| 8 | http origins accepted outside local | Start refused unless every portal origin is https |
+| 9 | Suggested times ignored the intent deadline | `deadline` exposed; suggestions stop at it; suggest button off when none fit |
+| 10 | ACCEPT and DECLINE kept offered times | Cleared |
+| 11 | Console cookie without Secure; plain token storage undocumented | Secure over https; storage guidance in code and guide |
+
+Also found while capturing screenshots: suggested times included 01:00 (comment promised working hours,
+code did not check). Fixed in the shared client, so the RingSays app and the SDK both benefit.
+
 ## Known gaps
 
 - Foundation doc section H transition table predates ADR 0004 refinements.
@@ -255,8 +292,9 @@ Test count: 725 backend tests, 15 domain, 20 client, 10 app unit, 13 SDK, 27 por
 - Toast messages inside an open dialog may not be announced by screen readers.
 - App and SDK not run on real iPhone or Android phones here; push providers are MOCK; app store builds (EAS) not made.
 - Device key is software (exportable inside secure storage); Secure Enclave / StrongBox key planned.
-- Enterprise API cannot offer time slots yet, so the SCHEDULE answer is untested end to end.
 - App delivery needs push permission; without it intents go by ordinary call (PSTN).
 - Incoming call screen integration (CallKit, ConnectionService) and caller name overlay not built.
 - Native header back arrow does not mirror in Arabic (native RTL off by design); app Arabic needs native review.
 - SDK card declines with reason "not now"; other reasons only through `useIntent`.
+- A lost create response, retried, returns the intent without its Context Token (shown once); re-issue endpoint needed.
+- Mock Bank customer app not run on a phone; bank side push to the app is not part of the sample (it polls).

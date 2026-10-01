@@ -93,7 +93,7 @@ export default function IntentScreen() {
     DECLINE: t("intent.decline"),
   };
   const offered = openSlots(intent);
-  const suggestions = suggestedSlots(intent.expected_duration_min);
+  const suggestions = suggestedSlots(intent.expected_duration_min, Date.now(), 3, intent.deadline);
 
   return (
     <Screen>
@@ -124,7 +124,9 @@ export default function IntentScreen() {
             title={label[a]}
             variant={a === "DECLINE" ? "ghost" : i === 0 ? "primary" : "secondary"}
             busy={respond.isPending && a === "TALK_NOW"}
-            disabled={respond.isPending || (a === "SCHEDULE" && offered.length === 0)}
+            disabled={
+              respond.isPending || (a === "SCHEDULE" && offered.length === 0) || (a === "PROPOSE" && suggestions.length === 0)
+            }
             onPress={() => onAction(a)}
           />
         ))}

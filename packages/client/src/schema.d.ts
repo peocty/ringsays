@@ -301,6 +301,11 @@ export interface components {
             status: components["schemas"]["IntentStatus"];
             /** Format: date-time */
             created_at?: string;
+            /**
+             * Format: date-time
+             * @description Latest end of any time the receiver proposes or picks.
+             */
+            deadline?: string | null;
             scheduled_slot?: components["schemas"]["Slot"] | null;
             proposed_slots?: components["schemas"]["Slot"][];
             organisation_name?: string | null;

@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 
 /**
  * RingSays enterprise API client, as a bank backend would write it: OAuth client credentials with
- * a cached token, an Idempotency-Key on every write (retries are safe), problem details on errors.
+ * a cached token, a time limit on every call, and an Idempotency-Key per bank operation that is
+ * reused when the call is retried (a lost response never creates a second intent).
  * The client secret and context tokens never leave this server and are never logged.
  */
 export interface Slot {
@@ -57,6 +58,8 @@ export class RingSaysApiError extends Error {
 
 export interface RingSaysOptions {
   baseUrl: string;
+  /** Per request limit (default 10 s). */
+  timeoutMs?: number;
   clientId: string;
   clientSecret: string;
   fetch?: typeof fetch;
@@ -74,8 +77,9 @@ export class RingSays {
     this.now = o.now ?? Date.now;
   }
 
-  createIntent(body: CreateIntent): Promise<Intent & { context_token?: string | null }> {
-    return this.call("POST", "/v1/intents", body, randomUUID());
+  /** `key`: the bank's own operation id; pass the same key again to retry safely. */
+  createIntent(body: CreateIntent, key: string = randomUUID()): Promise<Intent & { context_token?: string | null }> {
+    return this.call("POST", "/v1/intents", body, key);
   }
   getIntent(id: string): Promise<Intent> {
     return this.call("GET", `/v1/intents/${encodeURIComponent(id)}`);
@@ -122,9 +126,13 @@ export class RingSays {
   }
 
   private async call<T>(method: string, path: string, body?: unknown, idempotencyKey?: string): Promise<T> {
+    let refreshed = false;
     for (let attempt = 0; ; attempt++) {
       const token = await this.accessToken();
-      const res = await this.f(`${this.o.baseUrl}${path}`, {
+      let res: Response;
+      try {
+        res = await this.f(`${this.o.baseUrl}${path}`, {
+          signal: AbortSignal.timeout(this.o.timeoutMs ?? 10_000),
         method,
         headers: {
           Authorization: `Bearer ${token}`,
@@ -132,12 +140,20 @@ export class RingSays {
           ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
           ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
         },
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      });
-      if (res.status === 401 && attempt === 0) {
+          ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        });
+      } catch (e) {
+        // Timeout or connection failure: the request may or may not have reached RingSays. Retry once
+        // only when that is safe (a read, or a write with its idempotency key).
+        if (attempt === 0 && (method === "GET" || idempotencyKey)) continue;
+        throw new RingSaysApiError(0, { title: e instanceof Error && e.name === "TimeoutError" ? "RingSays did not answer in time" : "RingSays not reachable" });
+      }
+      if (res.status === 401 && !refreshed) {
+        refreshed = true;
         this.token = null; // revoked or rotated key: one fresh token, same idempotency key
         continue;
       }
+      if (res.status >= 500 && attempt === 0 && (method === "GET" || idempotencyKey)) continue;
       const text = await res.text();
       let parsed: unknown = null;
       try {

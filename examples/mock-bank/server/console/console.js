@@ -17,6 +17,8 @@ const STATUS_TEXT = {
 let boot = null;
 let timer = null;
 let lastJson = "";
+/** One id per request being prepared; kept until it succeeds, so a retry never sends twice. */
+let requestId = crypto.randomUUID();
 
 async function api(path, body) {
   const res = await fetch(path, {
@@ -123,6 +125,7 @@ async function send(e) {
   });
   try {
     await api("/console/api/intents", {
+      requestId,
       customerId: $("customer").value,
       purposeCode: $("purpose").value,
       priority: $("priority").value,
@@ -130,6 +133,7 @@ async function send(e) {
       maskedReference: $("reference").value || undefined,
       offeredSlots,
     });
+    requestId = crypto.randomUUID();
     renderSlots();
     await refresh();
   } catch (err) {

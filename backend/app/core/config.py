@@ -120,6 +120,9 @@ class Settings(BaseSettings):
             raise RuntimeError("RINGSAYS_BACKOFFICE_DATABASE_URL must be set when back office is enabled")
         if self.environment == "production" and self.use_mock_adapters:
             raise RuntimeError("mock adapters are not allowed in production")
+        insecure = [o for o in self.portal_origins if not o.startswith("https://")]
+        if insecure:
+            raise RuntimeError(f"RINGSAYS_PORTAL_ORIGINS must be https outside local: {insecure}")
 
 
 settings = Settings()

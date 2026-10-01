@@ -14,6 +14,7 @@ apps/portal/        enterprise portal and RingSays back office (React, Arabic an
 packages/client/    typed API client, device key and session (app and SDK)
 apps/mobile/        RingSays app (Expo, React Native), Arabic and English
 sdk/react-native/   enterprise SDK: show and answer intents inside a bank's own app
+examples/mock-bank/ fictional bank using the SDK: server, agent console, customer app
 infra/              Docker Compose for local; Helm and Terraform from stage 8
 docs/adr/           architecture decision records
 docs/STATUS.md      what is done, mocked, or needs device testing
@@ -94,6 +95,11 @@ Browser tests of the web build: `make e2e-mobile`. Release builds need `EXPO_PUB
 
 See `sdk/react-native/README.md`. Create the intent with `channel_preference` containing `SDK`, pass the
 returned `context_token` to the bank app, render `<IntentCard token=… />`.
+
+### Mock Bank sample
+
+A whole bank integration (fictional): `examples/mock-bank/README.md`. Quick start: `make bank-setup`,
+`make bank`, `make bank-app`, with the API and worker running.
 
 ## Rules for contributors
 

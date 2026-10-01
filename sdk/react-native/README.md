@@ -53,7 +53,11 @@ text shown as unverified, answers limited to `intent.actions`.
 
 * Install id is an app storage UUID, not a hardware bound key; it binds a token to one install only.
 * DECLINE from card sends reason `NOT_NOW`; richer reasons through `useIntent`.
-* SCHEDULE needs organisation offered slots; enterprise API cannot offer slots yet.
+* SCHEDULE appears when the organisation offered times (`offered_slots` on create).
+
+## Sample
+
+`examples/mock-bank` is a complete fictional bank (server, agent console, customer app) using this SDK.
 
 ## Develop
 

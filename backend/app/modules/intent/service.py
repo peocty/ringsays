@@ -151,6 +151,8 @@ def apply(
         webhooks.enqueue_for_event(conn, after, event, now)
     if after.is_terminal:
         context.revoke_for_intent(conn, after.intent_id, now)
+    elif after.valid_until > before.valid_until:
+        context.follow_validity(conn, after.intent_id, after.valid_until)
     audit.append(
         conn,
         tenant_id=after.tenant_id,

@@ -101,3 +101,51 @@ def test_organisation_accepts_customer_proposal(
     assert shown["status"] == "SCHEDULED"
     late = client.post(f"/v1/intents/{iid}/schedule", json={"slot": S2}, headers=auth(bank, str(uuid4())))
     assert late.status_code in (409, 422)
+
+
+def test_slot_bounds_offered_and_proposed(client: TestClient, tenant: SeededTenant, clock: Clock) -> None:
+    far = {"start": "2026-10-20T10:00:00Z", "end": "2026-10-20T10:10:00Z"}  # beyond 7 days
+    long = {"start": "2026-10-04T10:00:00Z", "end": "2026-10-04T13:00:00Z"}  # 3 hours
+    early = {"start": "2026-10-04T07:10:00Z", "end": "2026-10-04T07:20:00Z"}  # before valid_from
+    for bad in ([far], [long], [early], [S1, S1]):
+        h = auth(token_for(client, tenant), str(uuid4()))
+        r = client.post("/v1/intents", json=intent_body(tenant, offered_slots=bad), headers=h)
+        assert r.status_code == 422, (bad, r.text)
+
+    created = _create(client, tenant)
+    clock.now += OPENS
+    dev = {"RingSays-Device-Id": str(uuid4())}
+    token = created["context_token"]
+    client.get(f"/v1/tokens/{token}", headers=dev)
+    for bad in ([far], [long]):
+        r = client.post(
+            f"/v1/tokens/{token}/respond", headers=dev, json={"action": "PROPOSE", "proposed_slots": bad}
+        )
+        assert r.status_code == 422, r.text
+
+
+def test_token_lives_as_long_as_the_agreed_time(
+    client: TestClient, tenant: SeededTenant, clock: Clock
+) -> None:
+    # Window closes 08:00; customer picks the bank's 12:00 time; token must still work at 11:00.
+    created = _create(client, tenant, offered_slots=[S2])
+    clock.now += OPENS
+    dev = {"RingSays-Device-Id": str(uuid4())}
+    token = created["context_token"]
+    client.get(f"/v1/tokens/{token}", headers=dev)
+    r = client.post(f"/v1/tokens/{token}/respond", headers=dev, json={"action": "SCHEDULE", "slot": S2})
+    assert r.json()["status"] == "SCHEDULED"
+    clock.now = datetime(2026, 10, 4, 8, 0, tzinfo=UTC)  # 11:00 Riyadh, after the original window
+    shown = client.get(f"/v1/tokens/{token}", headers=dev)
+    assert shown.status_code == 200 and shown.json()["status"] == "SCHEDULED"
+    assert "DECLINE" in shown.json()["actions"]
+
+
+def test_accept_clears_offered_times(client: TestClient, tenant: SeededTenant, clock: Clock) -> None:
+    created = _create(client, tenant, offered_slots=[S1])
+    clock.now += OPENS
+    dev = {"RingSays-Device-Id": str(uuid4())}
+    client.get(f"/v1/tokens/{created['context_token']}", headers=dev)
+    client.post(f"/v1/tokens/{created['context_token']}/respond", headers=dev, json={"action": "ACCEPT"})
+    detail = client.get(f"/v1/intents/{created['intent_id']}", headers=auth(token_for(client, tenant))).json()
+    assert detail["status"] == "ACCEPTED" and detail["proposed_slots"] == []

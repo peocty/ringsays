@@ -69,6 +69,9 @@ EXPIRABLE: frozenset[IntentStatus] = frozenset(
 
 # After a scheduled slot ends, intent stays callable this long before it expires.
 SCHEDULE_GRACE = timedelta(minutes=15)
+#: No slot (offered by the organisation or proposed by the customer) lasts longer or lies further ahead.
+MAX_SLOT_LENGTH = timedelta(minutes=120)
+SLOT_HORIZON = timedelta(days=7)
 MAX_PROPOSED_SLOTS = 5
 LATER_OPTIONS_MIN = frozenset({15, 30, 60, 120})
 
@@ -136,7 +139,7 @@ def respond(
     _guard_not_expired(intent, now)
 
     if action is ResponseAction.ACCEPT:
-        return transition(intent, S.ACCEPTED, A.RECEIVER, now)
+        return transition(intent, S.ACCEPTED, A.RECEIVER, now, proposed_slots=())
 
     if action is ResponseAction.LATER:
         if later_minutes not in LATER_OPTIONS_MIN:
@@ -189,12 +192,15 @@ def respond(
             now,
             reason="message instead",
             decline_reason=DeclineReason.MESSAGE_INSTEAD,
+            proposed_slots=(),
         )
 
     if action is ResponseAction.DECLINE:
         if decline_reason is None:
             raise RuleViolation("decline_reason is required")
-        return transition(intent, S.DECLINED, A.RECEIVER, now, decline_reason=decline_reason)
+        return transition(
+            intent, S.DECLINED, A.RECEIVER, now, decline_reason=decline_reason, proposed_slots=()
+        )
 
     raise RuleViolation(f"Unsupported action {action}")  # pragma: no cover
 
@@ -270,4 +276,13 @@ def _check_proposals(intent: Intent, slots: Sequence[Slot], now: datetime) -> No
     for s in slots:
         if s.start <= now:
             raise RuleViolation("proposed slot is in the past")
+        check_slot_shape(s, latest_end=now + SLOT_HORIZON)
         _check_slot_against_deadline(intent, s)
+
+
+def check_slot_shape(s: Slot, *, latest_end: datetime) -> None:
+    """A slot is a call time, not a way to keep an intent open: bounded length and horizon."""
+    if s.end - s.start > MAX_SLOT_LENGTH:
+        raise RuleViolation("a slot may last at most 120 minutes")
+    if s.end > latest_end:
+        raise RuleViolation("a slot may be at most 7 days ahead")

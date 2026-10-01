@@ -15,6 +15,8 @@ export interface Customer {
 }
 
 export interface BankIntent {
+  /** The bank's own operation id, used as RingSays Idempotency-Key. */
+  requestId: string;
   intentId: string;
   customerId: string;
   purposeCode: string;
@@ -29,7 +31,11 @@ export interface BankIntent {
   declineReason: string | null;
   outcomeCode: string | null;
   validUntil: string;
-  /** Given only to the customer's own signed in app session; never to the console, never logged. */
+  /**
+   * Given only to the customer's own signed in app session; never to the console, never logged.
+   * Demo store keeps it in a 0600 file; a bank keeps it encrypted (or only in memory) and drops it
+   * once the intent ends.
+   */
   contextToken: string | null;
   events: { at: string; type: string; status: string; source: "webhook" | "api" }[];
   lastEventAt: string | null;
@@ -86,6 +92,10 @@ export class Store {
     return this.state.intents.find((i) => i.intentId === id);
   }
 
+  byRequest(requestId: string): BankIntent | undefined {
+    return this.state.intents.find((i) => i.requestId === requestId);
+  }
+
   forCustomer(customerId: string): BankIntent[] {
     return this.intents().filter((i) => i.customerId === customerId);
   }
@@ -126,7 +136,10 @@ export class Store {
     i.status = e.status;
     i.channelUsed = e.channel_used ?? i.channelUsed;
     if (e.type === "intent.scheduled") i.scheduledSlot = e.slot ?? null;
-    if (e.type === "intent.rescheduled") i.proposedSlots = e.proposed_slots ?? [];
+    if (e.type === "intent.rescheduled") {
+      i.proposedSlots = e.proposed_slots ?? [];
+      i.scheduledSlot = null;
+    }
     if (e.type === "intent.scheduled" || e.type === "intent.accepted") i.proposedSlots = [];
     if (e.type === "intent.declined") i.declineReason = e.decline_reason ?? null;
     if (e.type === "outcome.recorded") i.outcomeCode = e.outcome_code ?? null;

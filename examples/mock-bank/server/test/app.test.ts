@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { FastifyInstance } from "fastify";
 
 import { buildApp } from "../src/app.js";
@@ -69,7 +71,7 @@ async function createIntent(cookie: string, extra: Record<string, unknown> = {})
     method: "POST",
     url: "/console/api/intents",
     headers: { cookie, "x-console": "1" },
-    payload: { customerId: "cus_noura", purposeCode: "MORTGAGE.DOC.CLARIFY", priority: "NORMAL", durationMin: 5, maskedReference: "8291", ...extra },
+    payload: { requestId: randomUUID(), customerId: "cus_noura", purposeCode: "MORTGAGE.DOC.CLARIFY", priority: "NORMAL", durationMin: 5, maskedReference: "8291", ...extra },
   });
   return r;
 }
@@ -183,4 +185,31 @@ test("CORS only for the bank app origin; console has strict CSP", async () => {
   const page = await app.inject({ method: "GET", url: "/console" });
   expect(page.headers["content-security-policy"]).toContain("default-src 'self'");
   expect(page.body).not.toMatch(/<script>(?!<)/);
+});
+
+test("same request id twice (double click, retry): one intent, one RingSays call", async () => {
+  const cookie = await consoleCookie();
+  const requestId = randomUUID();
+  const [a, b] = await Promise.all([createIntent(cookie, { requestId }), createIntent(cookie, { requestId })]);
+  expect(a.json().intentId).toBe(b.json().intentId);
+  const again = await createIntent(cookie, { requestId });
+  expect(again.json().intentId).toBe(a.json().intentId);
+  const posts = rs.calls.filter((c) => c.url.endsWith("/v1/intents"));
+  expect(posts).toHaveLength(1);
+  expect(posts[0]!.headers.get("Idempotency-Key")).toBe(requestId);
+  expect((await createIntent(cookie, { requestId: "not-a-uuid" })).statusCode).toBe(400);
+});
+
+test("webhook for an intent not stored yet: 503 so RingSays retries", async () => {
+  const body = JSON.stringify({ event_id: "x1", type: "intent.delivered", occurred_at: new Date().toISOString(), intent_id: "unknown", status: "DELIVERED", channel_used: "SDK" });
+  const r = await app.inject({ method: "POST", url: "/webhooks/ringsays", headers: { "content-type": "application/json", "ringsays-signature": sign(body, "whsec_t", Math.floor(Date.now() / 1000)) }, payload: body });
+  expect(r.statusCode).toBe(503);
+});
+
+test("console throttle is per address, not global", async () => {
+  for (let i = 0; i < 5; i++) {
+    await app.inject({ method: "POST", url: "/console/login", payload: { password: "x" }, remoteAddress: "10.0.0.9" });
+  }
+  expect((await app.inject({ method: "POST", url: "/console/login", payload: { password: "console-pw" }, remoteAddress: "10.0.0.9" })).statusCode).toBe(429);
+  expect((await app.inject({ method: "POST", url: "/console/login", payload: { password: "console-pw" }, remoteAddress: "10.0.0.10" })).statusCode).toBe(200);
 });
