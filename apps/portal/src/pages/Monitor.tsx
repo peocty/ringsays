@@ -1,5 +1,5 @@
 import { INTENT_STATUSES, type IntentStatus } from "@ringsays/domain";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -9,7 +9,7 @@ import type { MonitorIntent, MonitorIntentDetail } from "../api/types";
 import { Alert, Button, Card, Dialog, Empty, ErrorAlert, Field, Loading, PageHeader, Pill, type Tone } from "../components/ui";
 import { config } from "../config";
 import { useLang } from "../i18n";
-import { formatDateTime } from "../lib/format";
+import { formatDateTime, zonedToIso } from "../lib/format";
 
 const STATUS_TONE: Partial<Record<IntentStatus, Tone>> = {
   REQUESTED: "info",
@@ -37,15 +37,15 @@ interface Filters {
 const EMPTY: Filters = { status: [], purpose_code: "", agent_id: "", phone: "", created_from: "", created_to: "" };
 type Page = { items: MonitorIntent[]; next_cursor: string | null };
 
-function toQuery(f: Filters, cursor?: string) {
+function toBody(f: Filters, cursor: string | undefined) {
   return {
     limit: 50,
     ...(f.status.length ? { status: f.status } : {}),
     ...(f.purpose_code ? { purpose_code: f.purpose_code } : {}),
     ...(f.agent_id ? { agent_id: f.agent_id } : {}),
     ...(f.phone ? { phone: f.phone } : {}),
-    ...(f.created_from ? { created_from: new Date(f.created_from).toISOString() } : {}),
-    ...(f.created_to ? { created_to: new Date(f.created_to).toISOString() } : {}),
+    ...(f.created_from ? { created_from: zonedToIso(f.created_from, config.timeZone) ?? undefined } : {}),
+    ...(f.created_to ? { created_to: zonedToIso(f.created_to, config.timeZone) ?? undefined } : {}),
     ...(cursor ? { cursor } : {}),
   };
 }
@@ -60,38 +60,34 @@ export function Monitor() {
   const [draft, setDraft] = useState<Filters>(EMPTY);
   const [filters, setFilters] = useState<Filters>(EMPTY);
   const [live, setLive] = useState(true);
-  const [older, setOlder] = useState<Page[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
 
-  const fetchPage = (cursor?: string) =>
-    unwrap<Page>(
-      api.GET("/tenants/{tenant_id}/intents", {
-        params: { path: { tenant_id: tid }, query: toQuery(filters, cursor) },
-        querySerializer: { array: { style: "form", explode: false } },
-      }),
-    );
-  const first = useQuery({
+  // POST search, so a customer's number never appears in a URL. Infinite query keyed by filters:
+  // live refresh refetches every loaded page in order, recomputing each cursor from the fresh page
+  // before it, so rows pushed down by new intents are never skipped.
+  const list = useInfiniteQuery({
     queryKey: keys.intents(tid, filters),
-    queryFn: () => fetchPage(),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      unwrap<Page>(
+        api.POST("/tenants/{tenant_id}/intents/search", {
+          params: { path: { tenant_id: tid } },
+          body: toBody(filters, pageParam),
+        }),
+      ),
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
     refetchInterval: live ? config.monitorRefreshMs : false,
-  });
-  const more = useMutation({
-    mutationFn: (cursor: string) => fetchPage(cursor),
-    onSuccess: (p) => setOlder((xs) => [...xs, p]),
   });
   const apply = (e: FormEvent) => {
     e.preventDefault();
-    setOlder([]);
     setFilters(draft);
   };
-  // Live refresh replaces the newest page; older pages stay until filters change.
   const seen = new Set<string>();
-  const rows = [first.data?.items ?? [], ...older.map((p) => p.items)].flat().filter((i) => {
+  const rows = (list.data?.pages ?? []).flatMap((p) => p.items).filter((i) => {
     if (seen.has(i.intent_id)) return false;
     seen.add(i.intent_id);
     return true;
   });
-  const lastCursor = older.length ? older[older.length - 1]!.next_cursor : (first.data?.next_cursor ?? null);
 
   return (
     <>
@@ -161,7 +157,6 @@ export function Monitor() {
             <Button
               onClick={() => {
                 setDraft(EMPTY);
-                setOlder([]);
                 setFilters(EMPTY);
               }}
             >
@@ -171,9 +166,9 @@ export function Monitor() {
         </form>
       </Card>
       <Card>
-        {first.isPending ? <Loading /> : null}
-        <ErrorAlert error={first.error ?? more.error} onRetry={() => void first.refetch()} />
-        {first.data && rows.length === 0 ? <Empty>{t("monitor.noIntents")}</Empty> : null}
+        {list.isPending ? <Loading /> : null}
+        <ErrorAlert error={list.error} onRetry={() => void list.refetch()} />
+        {list.data && rows.length === 0 ? <Empty>{t("monitor.noIntents")}</Empty> : null}
         {rows.length > 0 ? (
           <div className="table-wrap">
             <table className="table" data-testid="intents-table">
@@ -218,9 +213,9 @@ export function Monitor() {
             </table>
           </div>
         ) : null}
-        {lastCursor ? (
+        {list.hasNextPage ? (
           <div className="row center">
-            <Button busy={more.isPending} onClick={() => more.mutate(lastCursor)}>
+            <Button busy={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
               {t("common.loadMore")}
             </Button>
           </div>
@@ -271,7 +266,7 @@ function IntentDetail({ intentId, onClose, live }: { intentId: string; onClose: 
             <dd>{t(`monitor.level.${d.verification_level}`)}</dd>
             <dt>{t("monitor.validity")}</dt>
             <dd>
-              {formatDateTime(d.valid_from, lang)} → {formatDateTime(d.valid_until, lang)}
+              {formatDateTime(d.valid_from, lang)} {lang === "ar" ? "←" : "→"} {formatDateTime(d.valid_until, lang)}
             </dd>
             {d.scheduled_slot ? (
               <>

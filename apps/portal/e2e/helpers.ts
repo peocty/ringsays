@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -75,4 +76,12 @@ export async function sendIntent(token: string, agentId: string, phone: string):
   });
   if (r.status !== 201) throw new Error(`intent ${r.status} ${await r.text()}`);
   return ((await r.json()) as { intent_id: string }).intent_id;
+}
+
+/** A second, separate MOCK tenant for tests that change organisation wide state (suspension). */
+export function seedFresh(tag: string): Seed {
+  const backend = path.resolve(import.meta.dirname, "../../../backend");
+  const python = process.env.E2E_PYTHON ?? path.join(backend, ".venv/bin/python");
+  const out = execFileSync(python, ["-m", "app.scripts.seed", "--tag", tag, "--json"], { cwd: backend }).toString();
+  return { ...(JSON.parse(out) as Omit<Seed, "tag">), tag };
 }

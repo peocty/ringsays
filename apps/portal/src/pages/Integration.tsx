@@ -1,9 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { api, unwrap } from "../api/client";
-import { keys, useCan, useMembership } from "../api/session";
+import { keys, useCan, useCanChange, useMembership } from "../api/session";
 import type {
   ApiClient,
   Scope,
@@ -25,6 +25,7 @@ import {
   Pill,
   ReasonDialog,
   SecretPanel,
+  TabPanel,
   Tabs,
   useToast,
   type Tone,
@@ -52,6 +53,7 @@ export function Integration() {
     <>
       <PageHeader title={t("integration.title")} />
       <Tabs
+        prefix="integration"
         label={t("integration.title")}
         value={tab}
         onChange={setTab}
@@ -60,7 +62,9 @@ export function Integration() {
           { id: "webhooks", label: t("integration.tabWebhooks") },
         ]}
       />
-      <div role="tabpanel">{tab === "credentials" ? <Credentials /> : <Webhooks />}</div>
+      <TabPanel prefix="integration" value={tab}>
+        {tab === "credentials" ? <Credentials /> : <Webhooks />}
+      </TabPanel>
     </>
   );
 }
@@ -104,11 +108,15 @@ function Credentials() {
       setRevoking(null);
     },
   });
-  const manage = can("integration.manage");
+  const canChange = useCanChange();
+  const manage = can("integration.manage"); // revoke stays allowed while suspended
+  const canCreate = canChange("integration.manage");
+  // catalogue:write needs a role that may propose purpose codes (the API enforces the same rule).
+  const scopeChoices = SCOPES.filter((sc) => sc !== "catalogue:write" || can("catalogue.propose"));
   return (
     <Card
       actions={
-        manage ? (
+        canCreate ? (
           <Button
             variant="primary"
             onClick={() => {
@@ -186,7 +194,7 @@ function Credentials() {
           </Field>
           <fieldset className="fieldset">
             <legend>{t("integration.scopes")}</legend>
-            {SCOPES.map((s) => (
+            {scopeChoices.map((s) => (
               <label key={s} className="check-row">
                 <input
                   type="checkbox"
@@ -216,7 +224,10 @@ function Credentials() {
             { label: t("integration.clientId"), value: secret.id },
             { label: t("integration.clientSecret"), value: secret.secret },
           ]}
-          onDone={() => setSecret(null)}
+          onDone={() => {
+            setSecret(null);
+            create.reset(); // drop the secret from the mutation cache too
+          }}
         />
       ) : null}
       <ReasonDialog
@@ -227,6 +238,7 @@ function Credentials() {
         danger
         onClose={() => setRevoking(null)}
         onConfirm={(r) => revoke.mutate(r)}
+        onOpen={revoke.reset}
         busy={revoke.isPending}
         error={revoke.error}
       />
@@ -277,12 +289,13 @@ function Webhooks() {
       setDisabling(null);
     },
   });
-  const manage = can("integration.manage");
+  const canChange = useCanChange();
+  const manage = can("integration.manage"); // disable stays allowed while suspended
   const errs = fieldErrors(create.error);
   return (
     <Card
       actions={
-        manage ? (
+        canChange("integration.manage") ? (
           <Button
             variant="primary"
             onClick={() => {
@@ -383,7 +396,10 @@ function Webhooks() {
           title={t("integration.secretTitle")}
           body={t("integration.signingSecretBody")}
           items={[{ label: "RingSays-Signature", value: secret }]}
-          onDone={() => setSecret(null)}
+          onDone={() => {
+            setSecret(null);
+            create.reset();
+          }}
         />
       ) : null}
       <ReasonDialog
@@ -394,10 +410,13 @@ function Webhooks() {
         danger
         onClose={() => setDisabling(null)}
         onConfirm={(r) => disable.mutate(r)}
+        onOpen={disable.reset}
         busy={disable.isPending}
         error={disable.error}
       />
-      {viewing ? <DeliveryLog endpoint={viewing} onClose={() => setViewing(null)} canReplay={manage} /> : null}
+      {viewing ? (
+        <DeliveryLog endpoint={viewing} onClose={() => setViewing(null)} canReplay={canChange("integration.manage")} />
+      ) : null}
     </Card>
   );
 }
@@ -410,34 +429,21 @@ function DeliveryLog({ endpoint, onClose, canReplay }: { endpoint: WebhookEndpoi
   const qc = useQueryClient();
   const toast = useToast();
   const [status, setStatus] = useState<WebhookDeliveryStatus | "">("");
-  const [pages, setPages] = useState<WebhookDelivery[][]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const first = useQuery({
+  type Page = { items: WebhookDelivery[]; next_cursor: string | null };
+  // Keyed by filter, so a page fetched for an old filter can never show under a new one.
+  const log = useInfiniteQuery({
     queryKey: keys.deliveries(tid, endpoint.endpoint_id, status),
-    queryFn: () =>
-      unwrap<{ items: WebhookDelivery[]; next_cursor: string | null }>(
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      unwrap<Page>(
         api.GET("/tenants/{tenant_id}/webhook-endpoints/{endpoint_id}/deliveries", {
           params: {
             path: { tenant_id: tid, endpoint_id: endpoint.endpoint_id },
-            query: { limit: 50, ...(status ? { status } : {}) },
+            query: { limit: 50, ...(status ? { status } : {}), ...(pageParam ? { cursor: pageParam } : {}) },
           },
         }),
       ),
-  });
-  const more = useMutation({
-    mutationFn: (c: string) =>
-      unwrap<{ items: WebhookDelivery[]; next_cursor: string | null }>(
-        api.GET("/tenants/{tenant_id}/webhook-endpoints/{endpoint_id}/deliveries", {
-          params: {
-            path: { tenant_id: tid, endpoint_id: endpoint.endpoint_id },
-            query: { limit: 50, cursor: c, ...(status ? { status } : {}) },
-          },
-        }),
-      ),
-    onSuccess: (page) => {
-      setPages((p) => [...p, page.items]);
-      setCursor(page.next_cursor);
-    },
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
   });
   const replay = useMutation({
     mutationFn: (id: number) =>
@@ -448,12 +454,10 @@ function DeliveryLog({ endpoint, onClose, canReplay }: { endpoint: WebhookEndpoi
       ),
     onSuccess: () => {
       toast.notify(t("integration.replayed"));
-      setPages([]);
       void qc.invalidateQueries({ queryKey: ["tenant", tid, "deliveries", endpoint.endpoint_id] });
     },
   });
-  const rows = [...(first.data?.items ?? []), ...pages.flat()];
-  const nextCursor = pages.length ? cursor : (first.data?.next_cursor ?? null);
+  const rows = log.data?.pages.flatMap((p) => p.items) ?? [];
   return (
     <Dialog open title={`${t("integration.deliveries")}`} onClose={onClose} wide>
       <p>
@@ -467,10 +471,7 @@ function DeliveryLog({ endpoint, onClose, canReplay }: { endpoint: WebhookEndpoi
             <select
               {...p}
               value={status}
-              onChange={(e) => {
-                setPages([]);
-                setStatus(e.target.value as WebhookDeliveryStatus | "");
-              }}
+              onChange={(e) => setStatus(e.target.value as WebhookDeliveryStatus | "")}
             >
               <option value="">{t("common.all")}</option>
               {(["PENDING", "SENDING", "DELIVERED", "DEAD"] as const).map((s) => (
@@ -481,13 +482,13 @@ function DeliveryLog({ endpoint, onClose, canReplay }: { endpoint: WebhookEndpoi
             </select>
           )}
         </Field>
-        <Button variant="ghost" onClick={() => void first.refetch()}>
+        <Button variant="ghost" onClick={() => void log.refetch()}>
           {t("common.refresh")}
         </Button>
       </div>
-      {first.isPending ? <Loading /> : null}
-      <ErrorAlert error={first.error ?? replay.error ?? more.error} />
-      {first.data && rows.length === 0 ? <Empty>{t("integration.noDeliveries")}</Empty> : null}
+      {log.isPending ? <Loading /> : null}
+      <ErrorAlert error={log.error ?? replay.error} />
+      {log.data && rows.length === 0 ? <Empty>{t("integration.noDeliveries")}</Empty> : null}
       {rows.length > 0 ? (
         <div className="table-wrap">
           <table className="table">
@@ -537,9 +538,9 @@ function DeliveryLog({ endpoint, onClose, canReplay }: { endpoint: WebhookEndpoi
           </table>
         </div>
       ) : null}
-      {nextCursor ? (
+      {log.hasNextPage ? (
         <div className="row center">
-          <Button busy={more.isPending} onClick={() => more.mutate(nextCursor)}>
+          <Button busy={log.isFetchingNextPage} onClick={() => void log.fetchNextPage()}>
             {t("common.loadMore")}
           </Button>
         </div>

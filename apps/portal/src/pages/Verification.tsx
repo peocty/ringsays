@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ApiError, api, authHeaders, toProblem, unwrap } from "../api/client";
+import { ApiError, api, authHeaders, notifyUnauthenticated, toProblem, unwrap } from "../api/client";
 import { keys, useMembership } from "../api/session";
 import type { DocumentKind, Verification as VerificationT, VerificationDocument } from "../api/types";
 import { Alert, Button, Card, Empty, ErrorAlert, Field, Loading, PageHeader, Pill, useToast } from "../components/ui";
@@ -30,6 +30,7 @@ async function uploadDocument(tenantId: string, kind: DocumentKind, reference: s
     throw new ApiError({ status: 0, code: "network" });
   }
   const body: unknown = await res.json().catch(() => null);
+  if (res.status === 401) notifyUnauthenticated();
   if (!res.ok) throw new ApiError(await toProblem(res, body));
   return body as VerificationDocument;
 }

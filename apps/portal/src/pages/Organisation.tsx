@@ -3,8 +3,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { api, unwrap } from "../api/client";
-import { keys, useCan, useMembership } from "../api/session";
-import type { Agent, CallingNumber, Department, Tenant } from "../api/types";
+import { keys, useCan, useCanChange, useMembership } from "../api/session";
+import type { Agent, CallingNumber, Department, Tenant, Verification } from "../api/types";
 import {
   Button,
   Card,
@@ -18,6 +18,7 @@ import {
   PageHeader,
   Pill,
   ReasonDialog,
+  TabPanel,
   Tabs,
   useToast,
   type Tone,
@@ -35,6 +36,7 @@ export function Organisation() {
     <>
       <PageHeader title={t("organisation.title")} />
       <Tabs
+        prefix="org"
         label={t("organisation.title")}
         value={tab}
         onChange={setTab}
@@ -45,12 +47,12 @@ export function Organisation() {
           { id: "numbers", label: t("organisation.tabNumbers") },
         ]}
       />
-      <div role="tabpanel">
+      <TabPanel prefix="org" value={tab}>
         {tab === "profile" ? <Profile /> : null}
         {tab === "departments" ? <Departments /> : null}
         {tab === "agents" ? <Agents /> : null}
         {tab === "numbers" ? <Numbers /> : null}
-      </div>
+      </TabPanel>
     </>
   );
 }
@@ -79,6 +81,12 @@ function Profile() {
   const qc = useQueryClient();
   const toast = useToast();
   const tenant = useTenant(tid);
+  const canChange = useCanChange();
+  const verification = useQuery({
+    queryKey: keys.verification(tid),
+    queryFn: () => unwrap<Verification>(api.GET("/tenants/{tenant_id}/verification", path)),
+    enabled: can("org.manage"),
+  });
   const [form, setForm] = useState({ legal_name: { en: "", ar: "" }, commercial_registration: "", domain: "" });
   useEffect(() => {
     if (tenant.data) {
@@ -109,7 +117,8 @@ function Profile() {
   });
   if (tenant.isPending) return <Loading />;
   if (tenant.error) return <ErrorAlert error={tenant.error} />;
-  const editable = can("org.manage") && tenant.data.verification_status === "PENDING";
+  const underReview = verification.data?.latest_request?.status === "SUBMITTED";
+  const editable = canChange("org.manage") && tenant.data.verification_status === "PENDING" && !underReview;
   const errs = fieldErrors(save.error);
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -189,7 +198,7 @@ function Departments() {
   const { t } = useTranslation();
   const { lang } = useLang();
   const { tid, path } = usePath();
-  const can = useCan();
+  const can = useCanChange();
   const qc = useQueryClient();
   const depts = useDepartments();
   const [editing, setEditing] = useState<Department | "new" | null>(null);
@@ -306,7 +315,7 @@ function Agents() {
   const { t } = useTranslation();
   const { lang } = useLang();
   const { tid, path } = usePath();
-  const can = useCan();
+  const can = useCanChange();
   const qc = useQueryClient();
   const agents = useAllAgents();
   const depts = useDepartments();
@@ -468,7 +477,8 @@ function Numbers() {
   const { t } = useTranslation();
   const { lang } = useLang();
   const { tid, path } = usePath();
-  const can = useCan();
+  const can = useCanChange();
+  const canContain = useCan(); // stopping a number stays allowed while suspended
   const qc = useQueryClient();
   const depts = useDepartments();
   const numbers = useQuery({
@@ -559,7 +569,7 @@ function Numbers() {
                     {n.review_reason ? <div className="muted small" dir="auto">{n.review_reason}</div> : null}
                   </td>
                   <td className="actions-col">
-                    {can("org.manage") && n.status !== "REVOKED" ? (
+                    {canContain("org.manage") && n.status !== "REVOKED" ? (
                       <Button variant="ghost" onClick={() => setRevoking(n)}>
                         {t("organisation.revoke")}
                       </Button>
@@ -625,6 +635,7 @@ function Numbers() {
         danger
         onClose={() => setRevoking(null)}
         onConfirm={(r) => revoke.mutate(r)}
+        onOpen={revoke.reset}
         busy={revoke.isPending}
         error={revoke.error}
       />

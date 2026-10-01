@@ -861,6 +861,15 @@ input[type="file"] {
   .sidebar.open {
     transform: none;
   }
+  .sidebar:not(.open) {
+    visibility: hidden; /* off screen and out of the tab order */
+  }
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 20, 16, 0.4);
+    z-index: 39;
+  }
   .btn.menu-btn {
     display: inline-flex;
   }
@@ -878,4 +887,24 @@ input[type="file"] {
   .user-email {
     display: none;
   }
+}
+
+/* Session expired: stays on top of everything, page underneath is untouched */
+.session-banner {
+  position: fixed;
+  inset-block-start: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(640px, calc(100vw - 32px));
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }

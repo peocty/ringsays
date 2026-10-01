@@ -1,0 +1,21 @@
+#!/bin/sh
+# Sourced by the nginx entrypoint before templates are rendered. Fails the container on bad config.
+set -eu
+url_ok() { printf '%s' "$1" | grep -Eq '^https?://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/-]*)?$'; }
+origin_of() { printf '%s' "$1" | sed -E 's#^(https?://[^/]+).*#\1#'; }
+for v in API_BASE OIDC_AUTHORITY; do
+  eval "val=\${$v:-}"
+  if [ -z "$val" ] || ! url_ok "$val"; then
+    echo "ringsays portal: $v must be an http(s) URL, got '${val}'" >&2
+    exit 1
+  fi
+done
+: "${OIDC_CLIENT_ID:=ringsays-portal}"
+: "${PORTAL_TIME_ZONE:=Asia/Riyadh}"
+printf '%s' "$OIDC_CLIENT_ID" | grep -Eq '^[A-Za-z0-9._-]{1,128}$' || { echo "bad OIDC_CLIENT_ID" >&2; exit 1; }
+printf '%s' "$PORTAL_TIME_ZONE" | grep -Eq '^[A-Za-z_]+/[A-Za-z_]+$' || { echo "bad PORTAL_TIME_ZONE" >&2; exit 1; }
+API_ORIGIN="$(origin_of "$API_BASE")"
+# Token and end session endpoints may live on other hosts than the authority: add them as origins.
+OIDC_ORIGINS="$(origin_of "$OIDC_AUTHORITY") ${OIDC_EXTRA_ORIGINS:-}"
+for o in ${OIDC_EXTRA_ORIGINS:-}; do url_ok "$o" || { echo "bad OIDC_EXTRA_ORIGINS entry $o" >&2; exit 1; }; done
+export API_BASE OIDC_AUTHORITY OIDC_CLIENT_ID PORTAL_TIME_ZONE API_ORIGIN OIDC_ORIGINS

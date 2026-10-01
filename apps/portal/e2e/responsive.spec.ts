@@ -9,8 +9,11 @@ test("phone layout: menu opens, no horizontal page scroll", async ({ browser }) 
   await openTenant(page, s.tenant_id);
   const menu = page.getByRole("button", { name: "القائمة" });
   await expect(menu).toBeVisible();
+  // Closed menu is out of the tab order and hidden from assistive technology.
+  await expect(page.getByRole("link", { name: "رموز الغرض" })).toBeHidden();
   await menu.click();
   await page.getByRole("link", { name: "رموز الغرض" }).click();
+  await expect(page.locator(".backdrop")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "رموز الغرض" })).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);

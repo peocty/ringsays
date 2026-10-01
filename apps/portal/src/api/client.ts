@@ -27,6 +27,11 @@ export function configureApi(opts: { token: TokenSource; onUnauthenticated: () =
   language = opts.language;
 }
 
+/** For requests made with plain fetch (uploads, downloads): report an expired session. */
+export function notifyUnauthenticated(): void {
+  onUnauthenticated();
+}
+
 export async function authHeaders(): Promise<Record<string, string>> {
   const token = await tokenSource();
   const h: Record<string, string> = { "Accept-Language": language() };

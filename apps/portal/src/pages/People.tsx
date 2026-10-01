@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { api, unwrap } from "../api/client";
-import { keys, useMe, useMembership } from "../api/session";
+import { keys, useCan, useCanChange, useMe, useMembership } from "../api/session";
 import type { PortalUser, TenantRole } from "../api/types";
 import { Button, Card, Dialog, Empty, ErrorAlert, Field, fieldErrors, Loading, PageHeader, Pill, useToast } from "../components/ui";
 import { useLang } from "../i18n";
@@ -85,10 +85,13 @@ export function People() {
       ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: keys.users(tid) });
+      void qc.invalidateQueries({ queryKey: ["me"] }); // menus follow role changes at once
       setEditing(null);
     },
   });
   const needsAgent = form.roles.includes("AGENT");
+  const canChange = useCanChange()("users.manage");
+  const canDisable = useCan()("users.manage"); // disabling people stays allowed while suspended
   const agentName = (id: string | null | undefined) => {
     if (!id) return "—";
     const a = agents.data?.find((x) => x.agent_id === id);
@@ -116,6 +119,7 @@ export function People() {
         actions={
           <Button
             variant="primary"
+            disabled={!canChange}
             onClick={() => {
               invite.reset();
               setForm({ email: "", display_name: "", roles: [], agent_id: "" });
@@ -164,6 +168,8 @@ export function People() {
                       <td className="actions-col">
                         <Button
                           variant="ghost"
+                          disabled={!canChange || isMe}
+                          title={isMe ? t("people.selfNote") : undefined}
                           onClick={() => {
                             update.reset();
                             setForm({ email: u.email, display_name: "", roles: [...u.roles], agent_id: u.agent_id ?? "" });
@@ -176,7 +182,11 @@ export function People() {
                           <Button
                             variant="ghost"
                             onClick={() => update.mutate({ user: u, body: { status: u.status === "DISABLED" ? "ACTIVE" : "DISABLED" } })}
-                            disabled={u.status === "DISABLED" && u.last_sign_in_at === null}
+                            disabled={
+                              u.status === "DISABLED"
+                                ? !canChange || u.last_sign_in_at === null
+                                : !canDisable
+                            }
                           >
                             {u.status === "DISABLED" ? t("people.enable") : t("people.disable")}
                           </Button>

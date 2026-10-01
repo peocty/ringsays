@@ -93,6 +93,7 @@ export function ReviewQueuePage() {
         }
       />
       <Tabs
+        prefix="queue"
         label={t("backoffice.queueTitle")}
         value={tab}
         onChange={setTab}
@@ -103,6 +104,7 @@ export function ReviewQueuePage() {
         ]}
       />
       <Card>
+        <div role="tabpanel" id="queue-panel" aria-labelledby={`queue-tab-${tab}`}>
         {queue.isPending ? <Loading /> : null}
         <ErrorAlert error={queue.error} onRetry={() => void queue.refetch()} />
         {q && tab === "verifications" ? (
@@ -226,6 +228,7 @@ export function ReviewQueuePage() {
             </>
           )
         ) : null}
+        </div>
       </Card>
       <ReasonDialog
         open={pending !== null}
@@ -236,6 +239,7 @@ export function ReviewQueuePage() {
         danger={pending?.decision === "REJECT"}
         onClose={() => setPending(null)}
         onConfirm={(r) => decide.mutate(r)}
+        onOpen={decide.reset}
         busy={decide.isPending}
         error={decide.error}
       />
@@ -269,7 +273,7 @@ export function VerificationReviewPage() {
       setDecision(null);
       void qc.invalidateQueries({ queryKey: keys.queue });
       void qc.invalidateQueries({ queryKey: keys.review(requestId) });
-      toast.notify(t("common.save"));
+      toast.notify(t("backoffice.decisionRecorded"));
       navigate("/backoffice/queue");
     },
   });

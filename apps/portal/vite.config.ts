@@ -2,14 +2,16 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-const api = process.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
-const oidc = process.env.VITE_OIDC_AUTHORITY ?? "http://127.0.0.1:8000/dev/oidc";
+// Origins only (scheme, host, port), exactly as nginx/15-ringsays.envsh derives them: a CSP source
+// with a path matches that one URL only, which would block OIDC discovery and token calls.
+const api = new URL(process.env.VITE_API_BASE ?? "http://127.0.0.1:8000").origin;
+const oidc = new URL(process.env.VITE_OIDC_AUTHORITY ?? "http://127.0.0.1:8000/dev/oidc").origin;
 /** Same policy as nginx.conf.template, so browser tests run under the production CSP. */
 const csp = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self'",
-  "img-src 'self' data:",
+  "img-src 'self'",
   "font-src 'self'",
   `connect-src 'self' ${api} ${oidc}`,
   `form-action 'self' ${oidc}`,

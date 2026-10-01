@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-router";
 
@@ -7,7 +7,7 @@ import { ApiError, configureApi } from "./api/client";
 import { MembershipProvider, useMe } from "./api/session";
 import { AuthProvider, useAuth } from "./auth/AuthProvider";
 import { StaffShell, TenantShell } from "./components/Shell";
-import { ErrorAlert, Loading, ToastProvider } from "./components/ui";
+import { Button, ErrorAlert, Loading, ToastProvider } from "./components/ui";
 import { currentLang } from "./i18n";
 import { Audit } from "./pages/Audit";
 import { Callback, Centered, SignedOut, SignIn } from "./pages/Auth";
@@ -40,13 +40,28 @@ function RequireAuth() {
   const [expired, setExpired] = useState(false);
   // Configured during render (idempotent) so it is in place before any child query starts.
   configureApi({ token: auth.accessToken, onUnauthenticated: () => setExpired(true), language: currentLang });
-  const { signIn } = auth;
-  useEffect(() => {
-    if (expired) void signIn(location.pathname);
-  }, [expired, signIn, location.pathname]);
   if (!auth.ready) return <Loading />;
-  if (!auth.user || expired) return <SignIn />;
-  return <Outlet />;
+  if (!auth.user) return <SignIn />;
+  // A rejected session never redirects by itself: the page and anything typed stay put, and the
+  // person chooses to sign in again. This also rules out redirect loops.
+  return (
+    <>
+      {expired ? <SessionExpired onSignIn={() => void auth.signIn(location.pathname + location.search)} /> : null}
+      <Outlet />
+    </>
+  );
+}
+
+function SessionExpired({ onSignIn }: { onSignIn: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="session-banner" role="alert">
+      <span>{t("errors.401")}</span>
+      <Button variant="primary" onClick={onSignIn}>
+        {t("auth.signInAgain")}
+      </Button>
+    </div>
+  );
 }
 
 function NotFound() {

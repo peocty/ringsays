@@ -168,16 +168,31 @@ export function Pill({ tone = "neutral", children }: { tone?: Tone; children: Re
   return <span className={`pill pill-${tone}`}>{children}</span>;
 }
 
+/** Accessible tabs. Render the active panel inside <TabPanel id={tabPanelId(prefix)} />. */
+export function tabPanelId(prefix: string): string {
+  return `${prefix}-panel`;
+}
+
+export function TabPanel({ prefix, value, children }: { prefix: string; value: string; children: ReactNode }) {
+  return (
+    <div role="tabpanel" id={tabPanelId(prefix)} aria-labelledby={`${prefix}-tab-${value}`} tabIndex={0}>
+      {children}
+    </div>
+  );
+}
+
 export function Tabs<T extends string>({
   tabs,
   value,
   onChange,
   label,
+  prefix = "tabs",
 }: {
   tabs: { id: T; label: string }[];
   value: T;
   onChange: (v: T) => void;
   label: string;
+  prefix?: string;
 }) {
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
   const onKey = (e: React.KeyboardEvent, i: number) => {
@@ -187,6 +202,8 @@ export function Tabs<T extends string>({
     let j = i;
     if (e.key === nextKey) j = (i + 1) % tabs.length;
     else if (e.key === prevKey) j = (i - 1 + tabs.length) % tabs.length;
+    else if (e.key === "Home") j = 0;
+    else if (e.key === "End") j = tabs.length - 1;
     else return;
     e.preventDefault();
     const next = tabs[j];
@@ -205,6 +222,8 @@ export function Tabs<T extends string>({
           }}
           role="tab"
           type="button"
+          id={`${prefix}-tab-${tab.id}`}
+          aria-controls={tabPanelId(prefix)}
           aria-selected={tab.id === value}
           tabIndex={tab.id === value ? 0 : -1}
           className="tab"
@@ -240,15 +259,25 @@ export function Dialog({
   const titleId = useId();
   useEffect(() => {
     const d = ref.current;
-    if (!d) return;
-    if (open && !d.open) {
+    if (!d || !open) return;
+    // Remember what had focus, open, focus the first field (not the close button), and on close or
+    // unmount put focus back where it was.
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!d.open) {
       if (typeof d.showModal === "function") d.showModal();
       else d.setAttribute("open", "");
     }
-    if (!open && d.open) {
-      if (typeof d.close === "function") d.close();
-      else d.removeAttribute("open");
-    }
+    const first = d.querySelector<HTMLElement>(
+      ".dialog-body input:not([type=hidden]):not([disabled]), .dialog-body select, .dialog-body textarea, .dialog-body button",
+    );
+    first?.focus();
+    return () => {
+      if (d.open) {
+        if (typeof d.close === "function") d.close();
+        else d.removeAttribute("open");
+      }
+      if (opener && document.contains(opener)) opener.focus();
+    };
   }, [open]);
   return (
     <dialog
@@ -288,6 +317,7 @@ export function ReasonDialog({
   busy,
   error,
   reasonLabel,
+  onOpen,
 }: {
   open: boolean;
   title: string;
@@ -299,11 +329,17 @@ export function ReasonDialog({
   busy?: boolean;
   error?: unknown;
   reasonLabel?: string;
+  /** Clears the previous attempt's error when the dialog opens for another item. */
+  onOpen?: () => void;
 }) {
   const { t } = useTranslation();
   const [reason, setReason] = useState("");
   useEffect(() => {
-    if (open) setReason("");
+    if (open) {
+      setReason("");
+      onOpen?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on open
   }, [open]);
   const submit = (e: FormEvent) => {
     e.preventDefault();

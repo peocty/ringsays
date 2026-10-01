@@ -30,6 +30,15 @@ export function useCan(): (p: Permission) => boolean {
   return (p) => m.permissions.includes(p);
 }
 
+/**
+ * For changes: same as useCan, but false while the organisation is suspended (the API refuses them).
+ * Containment actions (revoke, disable, stop using) use useCan, because they stay allowed.
+ */
+export function useCanChange(): (p: Permission) => boolean {
+  const m = useMembership();
+  return (p) => m.permissions.includes(p) && m.verification_status !== "SUSPENDED";
+}
+
 /** Query keys per tenant, so switching organisation never shows another tenant's cached data. */
 export const keys = {
   tenant: (t: string) => ["tenant", t] as const,

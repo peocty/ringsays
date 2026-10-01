@@ -1,0 +1,26 @@
+# Single page app. ${API_ORIGIN}, ${OIDC_ORIGINS} and the runtime values come from
+# /docker-entrypoint.d/15-ringsays.envsh, which validates them at container start.
+server {
+    listen 8080;
+    root /usr/share/nginx/html;
+    server_tokens off;
+
+    location = /config.js {
+        include /etc/nginx/conf.d/security-headers.inc;
+        add_header Cache-Control "no-store" always;
+        default_type application/javascript;
+        return 200 'window.__RINGSAYS_CONFIG__={"apiBase":"${API_BASE}","oidcAuthority":"${OIDC_AUTHORITY}","oidcClientId":"${OIDC_CLIENT_ID}","timeZone":"${PORTAL_TIME_ZONE}"};';
+    }
+
+    location /assets/ {
+        include /etc/nginx/conf.d/security-headers.inc;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+    }
+
+    location / {
+        include /etc/nginx/conf.d/security-headers.inc;
+        add_header Cache-Control "no-store" always;
+        try_files $uri /index.html;
+    }
+}

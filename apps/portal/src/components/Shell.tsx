@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink, useNavigate } from "react-router";
+import { NavLink, useLocation, useNavigate } from "react-router";
 
 import { useMe } from "../api/session";
 import type { Membership, Permission } from "../api/types";
@@ -54,6 +54,23 @@ function TopBar({ children }: { children?: ReactNode }) {
 function Frame({ nav, header, children }: { nav: NavItem[]; header: ReactNode; children: ReactNode }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const location = useLocation();
+  const mainRef = useRef<HTMLElement>(null);
+  const first = useRef(true);
+  useEffect(() => {
+    // Move focus to the new page's content on navigation, so screen readers announce it.
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    mainRef.current?.focus();
+  }, [location.pathname]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
   return (
     <div className="shell">
       <a className="skip" href="#main">
@@ -75,6 +92,7 @@ function Frame({ nav, header, children }: { nav: NavItem[]; header: ReactNode; c
           </ul>
         </nav>
       </aside>
+      {open ? <div className="backdrop" onClick={() => setOpen(false)} aria-hidden /> : null}
       <div className="main-col">
         <header className="topbar">
           <button
@@ -87,7 +105,7 @@ function Frame({ nav, header, children }: { nav: NavItem[]; header: ReactNode; c
           </button>
           {header}
         </header>
-        <main id="main" tabIndex={-1}>
+        <main id="main" tabIndex={-1} ref={mainRef}>
           {children}
         </main>
       </div>

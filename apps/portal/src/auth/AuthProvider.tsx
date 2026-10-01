@@ -6,6 +6,8 @@ import { config } from "../config";
 /**
  * OpenID Connect sign in with authorization code and PKCE. Tokens are kept in sessionStorage
  * (cleared when the tab closes) and sent only as a bearer header, never as a cookie.
+ * Access tokens are short lived; they are renewed in the background with the refresh token
+ * (offline_access), and on demand just before a request if the background renewal missed.
  */
 export function createUserManager(): UserManager {
   return new UserManager({
@@ -14,9 +16,10 @@ export function createUserManager(): UserManager {
     redirect_uri: `${window.location.origin}/auth/callback`,
     post_logout_redirect_uri: `${window.location.origin}/signed-out`,
     response_type: "code",
-    scope: "openid email profile",
+    scope: config.oidcScope,
     userStore: new WebStorageStateStore({ store: window.sessionStorage }),
-    automaticSilentRenew: false,
+    automaticSilentRenew: true,
+    accessTokenExpiringNotificationTimeInSeconds: 60,
     loadUserInfo: false,
   });
 }
@@ -57,12 +60,16 @@ export function AuthProvider({ children, manager }: { children: ReactNode; manag
   }, [um]);
 
   const signIn = useCallback(
-    (returnTo?: string) => um.signinRedirect({ state: { returnTo: returnTo ?? window.location.pathname } }),
+    (returnTo?: string) =>
+      um.signinRedirect({ state: { returnTo: returnTo ?? window.location.pathname + window.location.search } }),
     [um],
   );
   const signOut = useCallback(async () => {
-    await um.removeUser();
-    await um.signoutRedirect().catch(() => window.location.assign("/signed-out"));
+    // signoutRedirect sends id_token_hint from the stored user, then removes it.
+    await um.signoutRedirect().catch(async () => {
+      await um.removeUser();
+      window.location.assign("/signed-out");
+    });
   }, [um]);
   const completeSignIn = useCallback(async () => {
     const u = await um.signinRedirectCallback();
@@ -73,7 +80,10 @@ export function AuthProvider({ children, manager }: { children: ReactNode; manag
     return target.startsWith("/") && !target.startsWith("//") ? target : "/";
   }, [um]);
   const accessToken = useCallback(async () => {
-    const u = await um.getUser();
+    let u = await um.getUser();
+    if (u && (u.expires_in ?? 0) < 30 && u.refresh_token) {
+      u = await um.signinSilent().catch(() => u);
+    }
     return u && !u.expired ? u.access_token : null;
   }, [um]);
 

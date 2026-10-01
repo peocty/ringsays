@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -27,18 +27,20 @@ export function Audit() {
   const tid = m.tenant_id;
   const [action, setAction] = useState("");
   const [applied, setApplied] = useState("");
-  const [older, setOlder] = useState<Page[]>([]);
-  const fetchPage = (cursor?: string) =>
-    unwrap<Page>(
-      api.GET("/tenants/{tenant_id}/audit-events", {
-        params: {
-          path: { tenant_id: tid },
-          query: { limit: 50, ...(applied ? { action: applied } : {}), ...(cursor ? { cursor } : {}) },
-        },
-      }),
-    );
-  const first = useQuery({ queryKey: keys.audit(tid, applied), queryFn: () => fetchPage() });
-  const more = useMutation({ mutationFn: (c: string) => fetchPage(c), onSuccess: (p) => setOlder((x) => [...x, p]) });
+  const log = useInfiniteQuery({
+    queryKey: keys.audit(tid, applied),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      unwrap<Page>(
+        api.GET("/tenants/{tenant_id}/audit-events", {
+          params: {
+            path: { tenant_id: tid },
+            query: { limit: 50, ...(applied ? { action: applied } : {}), ...(pageParam ? { cursor: pageParam } : {}) },
+          },
+        }),
+      ),
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+  });
   const verify = useMutation({
     mutationFn: () =>
       unwrap<{ intact: boolean; events_checked: number; head: string | null }>(
@@ -48,8 +50,7 @@ export function Audit() {
   const exporting = useMutation({
     mutationFn: () => downloadAuthenticated(`/tenants/${tid}/audit-events/export`, `ringsays-audit-${tid}.csv`),
   });
-  const rows = [...(first.data?.items ?? []), ...older.flatMap((p) => p.items)];
-  const cursor = older.length ? older[older.length - 1]!.next_cursor : (first.data?.next_cursor ?? null);
+  const rows = log.data?.pages.flatMap((p) => p.items) ?? [];
   return (
     <>
       <PageHeader
@@ -79,7 +80,6 @@ export function Audit() {
           className="row gap end-align"
           onSubmit={(e) => {
             e.preventDefault();
-            setOlder([]);
             setApplied(action.trim());
           }}
         >
@@ -88,9 +88,9 @@ export function Audit() {
           </Field>
           <Button type="submit">{t("common.apply")}</Button>
         </form>
-        {first.isPending ? <Loading /> : null}
-        <ErrorAlert error={first.error ?? more.error} />
-        {first.data && rows.length === 0 ? <Empty>{t("audit.noEvents")}</Empty> : null}
+        {log.isPending ? <Loading /> : null}
+        <ErrorAlert error={log.error} />
+        {log.data && rows.length === 0 ? <Empty>{t("audit.noEvents")}</Empty> : null}
         {rows.length > 0 ? (
           <div className="table-wrap">
             <table className="table" data-testid="audit-table">
@@ -129,9 +129,9 @@ export function Audit() {
             </table>
           </div>
         ) : null}
-        {cursor ? (
+        {log.hasNextPage ? (
           <div className="row center">
-            <Button busy={more.isPending} onClick={() => more.mutate(cursor)}>
+            <Button busy={log.isFetchingNextPage} onClick={() => void log.fetchNextPage()}>
               {t("common.loadMore")}
             </Button>
           </div>

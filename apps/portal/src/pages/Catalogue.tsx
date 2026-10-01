@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { api, unwrap } from "../api/client";
-import { keys, useCan, useMembership } from "../api/session";
+import { keys, useCanChange, useMembership } from "../api/session";
 import type { AdminPurposeCode } from "../api/types";
 import {
   Alert,
@@ -36,7 +36,7 @@ export function Catalogue() {
   const { t } = useTranslation();
   const { lang } = useLang();
   const m = useMembership();
-  const can = useCan();
+  const can = useCanChange();
   const tid = m.tenant_id;
   const path = { params: { path: { tenant_id: tid } } };
   const qc = useQueryClient();
@@ -248,6 +248,7 @@ export function Catalogue() {
         danger
         onClose={() => setRetiring(null)}
         onConfirm={(r) => retire.mutate(r)}
+        onOpen={retire.reset}
         busy={retire.isPending}
         error={retire.error}
       />
