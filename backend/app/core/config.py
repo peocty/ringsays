@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     tenant_creates_per_minute: int = 600
     tenant_urgent_per_day: int = 50
     recipient_intents_per_tenant_per_day: int = 3
+    otp_per_phone_per_hour: int = 5
+    otp_per_ip_per_hour: int = 30
+    otp_global_per_minute: int = 600
+    otp_failures_per_phone_per_day: int = 10
 
     def assert_safe_for_environment(self) -> None:
         if self.environment == "local":

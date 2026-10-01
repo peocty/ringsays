@@ -59,6 +59,7 @@ class _Plan:
     next_check: datetime | None = None
     targets: tuple[PushTarget, ...] = ()
     attempt_id: int | None = None
+    recipient: Recipient | None = None
 
 
 def _record(
@@ -179,6 +180,8 @@ def _deliver_one(
         plan = _plan(conn, intent_id, now, directory)
         if plan.next_check is not None:
             _set_next_check(conn, intent_id, plan.next_check)
+    if plan.kind == "delivered" and plan.recipient is not None:
+        _note_contact(directory, plan.recipient, intent_id, now, engine)
     if plan.kind != "push":
         return plan.kind
     # Send outside any transaction, then record result.
@@ -196,18 +199,38 @@ def _deliver_one(
         )
         if ok and intent.status is IntentStatus.REQUESTED:
             intent_service.mark_delivered(conn, intent_id, Channel.PRECALL_PUSH, now)
-            return "delivered"
-        _set_next_check(conn, intent_id, now)  # continue ladder on next tick
-    return "push_failed"
+            delivered = True
+        else:
+            delivered = False
+            _set_next_check(conn, intent_id, now)  # continue ladder on next tick
+    if delivered and plan.recipient is not None:
+        _note_contact(directory, plan.recipient, intent_id, now, engine)
+    return "delivered" if delivered else "push_failed"
+
+
+def _note_contact(
+    directory: RecipientDirectory, recipient: Recipient, intent_id: UUID, now: datetime, engine: Engine | None
+) -> None:
+    """Record the organisation in the user's consent ledger after any delivery that reached their device,
+    so it can be withdrawn from the RingSays app. Best effort: never undoes the delivery."""
+    try:
+        with worker_tx(engine) as conn:
+            intent, _ = repo.load(conn, intent_id)
+        if intent.tenant_id is not None:
+            directory.note_contact(recipient, intent.tenant_id, intent.consent_ref, now)
+    except Exception as exc:
+        log.error("could not record contact for %s: %s", intent_id, type(exc).__name__)
 
 
 def _plan(conn: Connection, intent_id: UUID, now: datetime, directory: RecipientDirectory) -> _Plan:
     intent, _ = repo.load(conn, intent_id, for_update=True)
     if intent.status is not IntentStatus.REQUESTED or intent.to_phone is None:
         return _Plan("skipped")
-    recipient = directory.lookup(intent.to_phone)
+    recipient = directory.lookup(intent.to_phone, intent.tenant_id)
     decision = Decision.ALLOW
-    if recipient is not None:
+    if recipient is not None and recipient.blocked:
+        decision = Decision.BLOCK
+    elif recipient is not None:
         outcome = evaluate(recipient.preferences, _context(intent), now)
         decision = outcome.decision
         if decision is Decision.HOLD_UNTIL_WINDOW and outcome.hold_until is not None:
@@ -231,7 +254,7 @@ def _plan(conn: Connection, intent_id: UUID, now: datetime, directory: Recipient
             if _token_resolved(conn, intent.intent_id):
                 _record(conn, intent, channel, "SENT", now, "resolved on device")
                 intent_service.mark_delivered(conn, intent.intent_id, Channel.SDK, now)
-                return _Plan("delivered")
+                return _Plan("delivered", recipient=recipient)
             sent = [a for a in previous if a[0] == Channel.SDK.value and a[1] == "SENT"]
             if not sent:
                 _record(conn, intent, channel, "SENT", now, "token with tenant; awaiting resolve")
@@ -247,7 +270,13 @@ def _plan(conn: Connection, intent_id: UUID, now: datetime, directory: Recipient
             targets = _push_targets(conn, intent, recipient, decision, now)
             if targets:
                 attempt_id = _record(conn, intent, channel, "SENDING", now, "push in flight")
-                return _Plan("push", next_check=now + PUSH_LEASE, targets=targets, attempt_id=attempt_id)
+                return _Plan(
+                    "push",
+                    next_check=now + PUSH_LEASE,
+                    targets=targets,
+                    attempt_id=attempt_id,
+                    recipient=recipient,
+                )
             continue
         if channel is Channel.PSTN:
             _record(conn, intent, channel, "SENT", now, "fallback to plain call")
@@ -278,12 +307,24 @@ def deliver_via_sdk(conn_anonymous: Connection, token: str, device_id: UUID, now
     delivers when the window opens.
     """
     tenant_id, intent_id = context.resolve(conn_anonymous, token, device_id, now)
+    delivered = False
     with tenant_tx(tenant_id) as conn:
         intent, _ = repo.load(conn, intent_id, for_update=True)
         if intent.status is IntentStatus.REQUESTED and intent.valid_from <= now:
             _record(conn, intent, Channel.SDK, "SENT", now, "resolved on device")
             intent = intent_service.mark_delivered(conn, intent_id, Channel.SDK, now)
-        return intent
+            delivered = True
+    if delivered and intent.to_phone is not None:
+        from .adapters import get_directory
+
+        directory = get_directory()
+        recipient = directory.lookup(intent.to_phone, tenant_id)
+        if recipient is not None:
+            try:
+                directory.note_contact(recipient, tenant_id, intent.consent_ref, now)
+            except Exception as exc:
+                log.error("could not record contact for %s: %s", intent_id, type(exc).__name__)
+    return intent
 
 
 def precall_push_after_commit(
@@ -300,10 +341,14 @@ def precall_push_after_commit(
         return False
     if intent.channel_used not in (Channel.SDK, Channel.PRECALL_PUSH):
         return False
-    recipient = directory.lookup(intent.to_phone)
+    recipient = directory.lookup(intent.to_phone, intent.tenant_id)
     if recipient is None or not recipient.devices:
         return False
-    decision = evaluate(recipient.preferences, _context(intent), now).decision
+    decision = (
+        Decision.BLOCK
+        if recipient.blocked
+        else evaluate(recipient.preferences, _context(intent), now).decision
+    )
     if decision is not Decision.ALLOW:
         with tenant_tx(tenant_id) as conn:
             _record(conn, intent, Channel.PRECALL_PUSH, "SKIPPED", now, "calling now: receiver rules")

@@ -112,9 +112,11 @@ def clock() -> Clock:
 @pytest.fixture
 def client(database: dict[str, str], clock: Clock) -> Iterator[TestClient]:
     from app.main import app
+    from app.modules.client import api as client_api
     from app.modules.intent import api
 
     app.dependency_overrides[api.clock] = clock
+    app.dependency_overrides[client_api.clock] = clock
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
@@ -174,7 +176,11 @@ def _isolated_limits_and_adapters() -> Iterator[None]:
         settings.tenant_creates_per_minute,
     )
     settings.recipient_intents_per_tenant_per_day = 1000
+    from app.modules.identity import service as identity
+
     adapters.configure(adapters.MockRecipientDirectory(), adapters.MockPushSender())
+    identity.configure_sms(identity.MockSmsSender())
+    identity.clear_device_cache()
     auth_mod.clear_client_status_cache()
     yield
     (
@@ -183,3 +189,53 @@ def _isolated_limits_and_adapters() -> Iterator[None]:
         settings.tenant_creates_per_minute,
     ) = saved
     ratelimit.set_limiter(None)
+
+
+class AppUser:
+    """A signed in RingSays app user with a real P-256 device key (as the phone would hold)."""
+
+    def __init__(self, client: TestClient, phone: str, apns: str | None = "apns-test-token") -> None:
+        import base64
+
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        from app.modules.identity import service as identity
+
+        self.client, self.phone = client, phone
+        self.key = ec.generate_private_key(ec.SECP256R1())
+        public = self.key.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        r = client.post("/v1/auth/otp", json={"phone": phone, "locale": "ar"})
+        assert r.status_code == 202, r.text
+        sms = identity.get_sms()
+        assert isinstance(sms, identity.MockSmsSender)
+        code = sms.last_code_for(phone)
+        r = client.post(
+            "/v1/auth/verify",
+            json={
+                "challenge_id": r.json()["challenge_id"],
+                "code": code,
+                "device": {
+                    "platform": "IOS",
+                    "public_key": base64.b64encode(public).decode(),
+                    "app_version": "0.1.0",
+                    "push": {"apns": apns},
+                },
+            },
+        )
+        assert r.status_code == 200, r.text
+        self.tokens = r.json()
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.tokens['access_token']}", "Accept-Language": "ar"}
+
+    def sign(self, message: str) -> str:
+        import base64
+
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        return base64.b64encode(self.key.sign(message.encode(), ec.ECDSA(hashes.SHA256()))).decode()

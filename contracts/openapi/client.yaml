@@ -134,7 +134,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [REQUESTS, SCHEDULED, HISTORY, UNVERIFIED]
+            enum: [REQUESTS, SCHEDULED, HISTORY]
       responses:
         "200":
           description: Inbox page.
@@ -146,20 +146,42 @@ paths:
                 properties:
                   items:
                     type: array
-                    items: { $ref: "./common.yaml#/components/schemas/Intent" }
+                    items: { $ref: "#/components/schemas/IntentDisplay" }
                   next_cursor: { type: [string, "null"] }
+
+  /me/intents/{intent_id}:
+    get:
+      tags: [Inbox]
+      operationId: getMyIntent
+      summary: One intent addressed to signed in user
+      parameters:
+        - $ref: "./common.yaml#/components/parameters/IntentId"
+        - $ref: "./common.yaml#/components/parameters/AcceptLanguage"
+      responses:
+        "200":
+          description: Intent display.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IntentDisplay" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
 
   /tokens/{token}:
     get:
       tags: [Intents]
       operationId: resolveContextToken
-      summary: Resolve Context Token to display payload
-      description: Single resolve per device. Refused after intent completion or expiry.
+      summary: Resolve Context Token to display payload (enterprise SDK)
+      description: |
+        Used by the enterprise SDK inside the tenant's own app; no RingSays account needed.
+        First resolve binds the token to `RingSays-Device-Id` (SDK install id); other devices are refused.
+        Refused after intent completion or expiry. Before the intent window opens, the resolve binds the
+        device and returns status REQUESTED; delivery happens when the window opens.
+      security: []
       parameters:
         - name: token
           in: path
           required: true
-          schema: { type: string, minLength: 22, maxLength: 64 }
+          schema: { type: string, minLength: 16, maxLength: 64 }
+        - $ref: "#/components/parameters/DeviceId"
         - $ref: "./common.yaml#/components/parameters/AcceptLanguage"
       responses:
         "200":
@@ -168,17 +190,21 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/IntentDisplay" }
         "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
-        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
         "410": { $ref: "./common.yaml#/components/responses/Gone" }
 
-  /intents/{intent_id}/respond:
+  /tokens/{token}/respond:
     post:
       tags: [Intents]
-      operationId: respondToIntent
-      summary: Receiver response to an intent
+      operationId: respondViaContextToken
+      summary: Respond to an intent from the enterprise SDK
+      security: []
       parameters:
-        - $ref: "./common.yaml#/components/parameters/IntentId"
-        - $ref: "./common.yaml#/components/parameters/IdempotencyKey"
+        - name: token
+          in: path
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 64 }
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "./common.yaml#/components/parameters/AcceptLanguage"
       requestBody:
         required: true
         content:
@@ -189,10 +215,34 @@ paths:
           description: Response applied.
           content:
             application/json:
-              schema: { $ref: "./common.yaml#/components/schemas/Intent" }
+              schema: { $ref: "#/components/schemas/IntentDisplay" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+        "410": { $ref: "./common.yaml#/components/responses/Gone" }
+
+  /intents/{intent_id}/respond:
+    post:
+      tags: [Intents]
+      operationId: respondToIntent
+      summary: Receiver response to an intent
+      parameters:
+        - $ref: "./common.yaml#/components/parameters/IntentId"
+        - $ref: "./common.yaml#/components/parameters/AcceptLanguage"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IntentResponse" }
+      responses:
+        "200":
+          description: Response applied.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IntentDisplay" }
         "404": { $ref: "./common.yaml#/components/responses/NotFound" }
         "409": { $ref: "./common.yaml#/components/responses/Conflict" }
         "410": { $ref: "./common.yaml#/components/responses/Gone" }
+        "422": { $ref: "./common.yaml#/components/responses/UnprocessableEntity" }
 
   /me/preferences:
     get:
@@ -201,7 +251,9 @@ paths:
       summary: Get communication rules
       responses:
         "200":
-          description: Rules.
+          description: Rules. ETag header carries version for If-Match.
+          headers:
+            ETag: { schema: { type: string } }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Preferences" }
@@ -263,17 +315,23 @@ paths:
     post:
       tags: [Privacy]
       operationId: requestExport
-      summary: Request full data export
+      summary: Download all personal data RingSays holds for this user
       responses:
-        "202":
-          description: Export job accepted.
+        "200":
+          description: Export document.
           content:
             application/json:
               schema:
                 type: object
-                required: [job_id]
+                required: [generated_at, profile, devices, preferences, consents, communications_received]
                 properties:
-                  job_id: { type: string, format: uuid }
+                  generated_at: { type: string, format: date-time }
+                  profile: { type: object }
+                  devices: { type: array, items: { type: object } }
+                  preferences: { $ref: "#/components/schemas/Preferences" }
+                  consents: { type: array, items: { $ref: "#/components/schemas/Consent" } }
+                  communications_received: { type: array, items: { type: object } }
+                  address_book: { type: string, const: never collected }
 
   /me:
     delete:
@@ -284,6 +342,14 @@ paths:
         "202": { description: Erasure scheduled; completes within retention SLA. }
 
 components:
+  parameters:
+    DeviceId:
+      name: RingSays-Device-Id
+      in: header
+      required: true
+      description: SDK installation id (UUID), generated once per app install.
+      schema: { type: string, format: uuid }
+
   securitySchemes:
     bearer:
       type: http
@@ -321,9 +387,18 @@ components:
 
     IntentDisplay:
       type: object
-      required: [intent_id, verification_level, intent_source, priority, expected_duration_min, valid_until, actions]
+      required: [intent_id, status, verification_level, intent_source, priority, expected_duration_min, valid_until, actions]
       properties:
         intent_id: { $ref: "./common.yaml#/components/schemas/IntentId" }
+        status: { $ref: "./common.yaml#/components/schemas/IntentStatus" }
+        created_at: { type: string, format: date-time }
+        scheduled_slot:
+          oneOf:
+            - { $ref: "./common.yaml#/components/schemas/Slot" }
+            - { type: "null" }
+        proposed_slots:
+          type: array
+          items: { $ref: "./common.yaml#/components/schemas/Slot" }
         organisation_name: { type: [string, "null"] }
         department_name: { type: [string, "null"] }
         agent_display_name: { type: [string, "null"] }
@@ -357,8 +432,9 @@ components:
           minItems: 1
           maxItems: 5
           items: { $ref: "./common.yaml#/components/schemas/Slot" }
-        slot_id: { type: string, format: uuid }
-        message: { type: string, maxLength: 500 }
+        slot:
+          description: For SCHEDULE, one of the slots offered by caller.
+          $ref: "./common.yaml#/components/schemas/Slot"
         decline_reason: { $ref: "./common.yaml#/components/schemas/DeclineReason" }
 
     TimeWindow:

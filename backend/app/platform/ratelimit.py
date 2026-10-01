@@ -127,6 +127,65 @@ class Limiter:
             c = counters[exceeded - 1]
             raise RateLimited(c.message, c.retry_after_s)
 
+    def check_otp(self, phone_hash: str, client_ip: str, now: datetime) -> None:
+        """Code requests: per phone per hour, per client address per hour, and platform wide per minute.
+        Fails closed: SMS pumping costs money and floods customers."""
+        now = now.astimezone(UTC)
+        hour, minute = now.strftime("%Y%m%d%H"), now.strftime("%Y%m%d%H%M")
+        ip_key = hmac.new(settings.phone_pepper.encode(), client_ip.encode(), hashlib.sha256).hexdigest()[:24]
+        counters = [
+            (
+                f"rl:otp:{phone_hash[:32]}:{hour}",
+                settings.otp_per_phone_per_hour,
+                3700,
+                "Too many codes requested for this number; try later",
+            ),
+            (
+                f"rl:otpip:{ip_key}:{hour}",
+                settings.otp_per_ip_per_hour,
+                3700,
+                "Too many sign in attempts from this network; try later",
+            ),
+            (f"rl:otpall:{minute}", settings.otp_global_per_minute, 120, "Sign in is busy; retry shortly"),
+        ]
+        args: list[int] = [len(counters), *(c[1] for c in counters), *(c[2] for c in counters)]
+        try:
+            exceeded = int(self._script(keys=[c[0] for c in counters], args=args))
+        except redis.RedisError as exc:
+            log.error("rate limiter unavailable, refusing OTP: %s", type(exc).__name__)
+            raise LimiterUnavailable("Sign in temporarily unavailable; retry shortly", 30) from exc
+        if exceeded:
+            raise RateLimited(counters[exceeded - 1][3], 3600 - now.minute * 60)
+
+    def _fail_key(self, phone_hash: str, now: datetime) -> str:
+        return f"rl:otpfail:{phone_hash[:32]}:{now.astimezone(UTC).strftime('%Y%m%d')}"
+
+    def check_otp_failures(self, phone_hash: str, now: datetime) -> None:
+        """Wrong codes per phone per day, counted across all codes. Locks sign in for the day when reached."""
+        try:
+            raw = self._r.get(self._fail_key(phone_hash, now))
+            failures = int(raw) if isinstance(raw, (bytes, str, int)) else 0
+        except redis.RedisError as exc:
+            raise LimiterUnavailable("Sign in temporarily unavailable; retry shortly", 30) from exc
+        if failures >= settings.otp_failures_per_phone_per_day:
+            raise RateLimited("Too many wrong codes for this number today", _until_midnight_utc(now))
+
+    def record_otp_failure(self, phone_hash: str, now: datetime) -> None:
+        key = self._fail_key(phone_hash, now)
+        try:
+            pipe = self._r.pipeline()
+            pipe.incr(key)
+            pipe.expire(key, _until_midnight_utc(now) + 60)
+            pipe.execute()
+        except redis.RedisError as exc:
+            log.error("could not record OTP failure: %s", type(exc).__name__)
+
+    def mark_revoked(self, key: str, ttl_s: int) -> None:
+        self._r.set(f"revoked:{key}", "1", ex=ttl_s)
+
+    def is_revoked(self, key: str) -> bool:
+        return bool(self._r.exists(f"revoked:{key}"))
+
 
 _limiter: Limiter | None = None
 

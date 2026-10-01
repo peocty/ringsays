@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime
 from functools import lru_cache
 from uuid import UUID
 
@@ -37,6 +38,25 @@ def tenant_tx(tenant_id: UUID, engine: Engine | None = None) -> Iterator[Connect
     eng = engine or get_engine()
     with eng.begin() as conn:
         conn.execute(text("SELECT set_config('app.tenant_id', :t, true)"), {"t": str(tenant_id)})
+        yield conn
+
+
+@contextmanager
+def user_tx(
+    user_id: UUID, phone_hash: str, since: datetime | None, engine: Engine | None = None
+) -> Iterator[Connection]:
+    """Signed in RingSays user: own identity rows, plus read access to intents addressed to their phone
+    created on or after `since` (account creation). Earlier intents belong to a previous holder of the
+    number and stay invisible. `since=None` gives access to own identity rows only."""
+    eng = engine or get_engine()
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "SELECT set_config('app.user_id', :u, true), set_config('app.phone_hash', :p, true), "
+                "set_config('app.user_since', :s, true)"
+            ),
+            {"u": str(user_id), "p": phone_hash, "s": since.isoformat() if since else ""},
+        )
         yield conn
 
 

@@ -114,6 +114,7 @@ intents = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     Column("delivery_next_check_at", DateTime(timezone=True)),
+    Column("to_phone_hash", Text),
     schema="intent",
 )
 
@@ -237,4 +238,85 @@ webhook_deliveries = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("delivered_at", DateTime(timezone=True)),
     schema="platform",
+)
+
+
+users = Table(
+    "users",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("phone_hash", Text, nullable=False),
+    Column("phone_ciphertext", Text),
+    Column("display_name", Text),
+    Column("locale", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("erased_at", DateTime(timezone=True)),
+    schema="identity",
+)
+
+devices = Table(
+    "devices",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("user_id", UUID(as_uuid=True), nullable=False),
+    Column("platform", Text, nullable=False),
+    Column("public_key", Text, nullable=False),
+    Column("app_version", Text, nullable=False),
+    Column("apns_token", Text),
+    Column("pushkit_token", Text),
+    Column("fcm_token", Text),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("revoked_at", DateTime(timezone=True)),
+    schema="identity",
+)
+
+otp_challenges = Table(
+    "otp_challenges",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("phone_hash", Text, nullable=False),
+    Column("phone_ciphertext", Text, nullable=False),
+    Column("code_hash", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("attempts", Integer, nullable=False),
+    Column("consumed_at", DateTime(timezone=True)),
+    schema="identity",
+)
+
+refresh_tokens = Table(
+    "refresh_tokens",
+    metadata,
+    Column("token_hash", Text, primary_key=True),
+    Column("user_id", UUID(as_uuid=True), nullable=False),
+    Column("device_id", UUID(as_uuid=True), nullable=False),
+    Column("family_id", UUID(as_uuid=True), nullable=False),
+    Column("issued_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("rotated_at", DateTime(timezone=True)),
+    Column("revoked_at", DateTime(timezone=True)),
+    schema="identity",
+)
+
+preferences = Table(
+    "preferences",
+    metadata,
+    Column("user_id", UUID(as_uuid=True), primary_key=True),
+    Column("document", JSONB, nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    schema="identity",
+)
+
+consents = Table(
+    "consents",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("user_id", UUID(as_uuid=True), nullable=False),
+    Column("tenant_id", UUID(as_uuid=True), nullable=False),
+    Column("purpose", Text, nullable=False),
+    Column("basis_ref", Text),
+    Column("granted_at", DateTime(timezone=True), nullable=False),
+    Column("withdrawn_at", DateTime(timezone=True)),
+    schema="identity",
 )

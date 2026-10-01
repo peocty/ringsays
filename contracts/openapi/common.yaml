@@ -24,11 +24,12 @@ components:
       name: Accept-Language
       in: header
       required: false
-      description: Language for rendered display text. Supported values en, ar.
+      description: |
+        Standard Accept-Language header (for example `ar-SA`, `en-US,en;q=0.9`). Text is rendered in the
+        first listed language whose primary subtag is ar or en; otherwise Arabic.
       schema:
         type: string
-        enum: [en, ar]
-        default: en
+        default: ar
     Cursor:
       name: cursor
       in: query

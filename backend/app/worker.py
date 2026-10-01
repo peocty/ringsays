@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 
 from app.core.config import settings
 from app.core.db import worker_tx
+from app.modules.client.directory import DbRecipientDirectory
 from app.modules.delivery import adapters
 from app.modules.delivery import service as delivery
 from app.modules.intent import jobs
@@ -70,8 +71,9 @@ def tick(now: datetime, publisher: outbox.Publisher, sender: webhooks.HttpSender
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     settings.assert_safe_for_environment()
+    adapters.configure(directory=DbRecipientDirectory())
     if settings.use_mock_adapters:
-        log.warning("worker running with MOCK push, directory, broker and webhook sender")
+        log.warning("worker running with MOCK push, broker and webhook sender")
         publisher: outbox.Publisher = outbox.MockPublisher()
         sender: webhooks.HttpSender = webhooks.MockHttpSender()
     else:

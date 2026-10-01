@@ -98,12 +98,46 @@ Test count: 617 backend tests, 15 TypeScript tests.
 
 Also raised: limiter failing open removed the URGENT cap. Now URGENT fails closed.
 
+## Stage 4 (2026-10-01)
+
+| Area | Item | Status |
+| --- | --- | --- |
+| Identity | Phone sign in with one time code (MOCK SMS), device registration with P-256 key | Done, tested here |
+| Identity | Access tokens, rotating refresh tokens signed by device key, reuse detection | Done, tested here |
+| Identity | Code request limits per phone, network and platform; daily wrong code cap; all fail closed | Done, tested here |
+| Client API | Inbox with folders and paging, intent detail, Arabic and English rendering from approved templates | Done, tested here |
+| Client API | Respond: talk now, later, propose times, schedule, message instead, decline | Done, tested here |
+| Client API | Enterprise SDK endpoints: resolve and respond with Context Token, no account needed | Done, tested here |
+| Privacy | Preferences with ETag and validation, consent ledger and withdrawal, export, erasure | Done, tested here |
+| Privacy | Previous holder's intents never visible to a later account on the same number (ADR 0009) | Done, tested here |
+| Delivery | Real recipient directory from RingSays accounts; push reaches signed in devices (MOCK push provider) | Done, tested here |
+| Contracts | Client API responses validated against client.yaml at runtime in tests | Done, tested here |
+
+Test count: 650 backend tests, 15 TypeScript tests.
+
+### Independent review (stage 4)
+
+| # | Defect | Fix |
+| --- | --- | --- |
+| 1 | New account on erased or recycled number saw and could answer previous holder's intents | Recipient policy bounded by account creation time (ADR 0009) |
+| 2 | Sign in codes could be brute forced across challenges; unbounded SMS sending | Old codes invalidated, daily wrong code cap, per network and platform limits |
+| 3 | SDK deliveries never created consent entries; withdrawal did not hide them | SDK delivery records contact; withdrawn organisations removed from inbox |
+| 4 | Real Accept-Language headers (en-US, ar-SA) rejected | Header parsed with quality values; Arabic default |
+| 5 | Message text accepted and silently dropped | Field removed; free text refused until a reviewed design exists |
+| 6 | Two first sign ins for one number gave a 500 | Insert with ON CONFLICT |
+| 7 | Two devices saving preferences first time gave a 500 | Insert with ON CONFLICT, loser gets 412 |
+| 8 | Export listed communications never received | Same filter as inbox |
+| 9 | Erasure took up to 30 s to reach other API processes | Shared revocation list in Redis; 5 s cache fallback |
+
+Also: timezone validation now accepts only IANA region zones.
+
 ## Known gaps
 
 - Foundation doc section H transition table predates ADR 0004 refinements.
 - Several list endpoints lack a 4XX response in contracts (lint warnings).
 - Webhook endpoint registration and replay have service functions but no HTTP route yet; admin API arrives with the portal (stage 5).
-- Recipient directory is MOCK until client API and identity (stage 4).
+- SMS provider and push providers (APNs, FCM) are MOCK; real KSA SMS provider and Apple/Google credentials needed.
+- Consumer to consumer intents and Request to Talk are MVP 2.
 - Tenant sector is fixed to BANK for receiver rules until admin API sets it per tenant.
 - A Context Token replayed through idempotency comes back null (shown once); a re-issue endpoint is needed.
 - Audit chain heads must be exported to write once storage by an operations job; export target not built.

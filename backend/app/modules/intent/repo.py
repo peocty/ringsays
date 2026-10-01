@@ -8,6 +8,7 @@ from uuid import UUID
 
 from sqlalchemy import Connection, Row, insert, select, update
 
+from app.core.phone import phone_hash
 from app.core.tables import intent_events, intents
 
 from .domain import (
@@ -118,6 +119,7 @@ def insert_intent(conn: Connection, i: Intent) -> None:
             created_at=i.created_at,
             version=1,
             delivery_next_check_at=i.valid_from,
+            to_phone_hash=phone_hash(i.to_phone) if i.to_phone else None,
             **_row_values(i),
         )
     )

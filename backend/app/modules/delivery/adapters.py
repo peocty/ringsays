@@ -10,6 +10,7 @@ Push content passes through Apple and Google, so the app fetches details over Ri
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
@@ -30,10 +31,21 @@ class Recipient:
     user_ref: UUID
     devices: tuple[PushTarget, ...]
     preferences: Preferences = field(default_factory=Preferences)
+    # User withdrew consent for the sending organisation in RingSays: no RingSays push and no RingSays
+    # inbox entry, URGENT included. The organisation's own app (SDK) remains the organisation's channel.
+    blocked: bool = False
 
 
 class RecipientDirectory(Protocol):
-    def lookup(self, phone_e164: str) -> Recipient | None: ...
+    def lookup(self, phone_e164: str, tenant_id: UUID | None) -> Recipient | None:
+        """Recipient as seen by this tenant: preferences include a block if consent was withdrawn."""
+        ...
+
+    def note_contact(
+        self, recipient: Recipient, tenant_id: UUID, basis_ref: str | None, now: datetime
+    ) -> None:
+        """Called after an app delivery, to record the organisation in the user's consent ledger."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,9 +63,15 @@ class MockRecipientDirectory:
     """MOCK: phone to recipient map configured by tests or local seed."""
 
     by_phone: dict[str, Recipient] = field(default_factory=dict)
+    contacts: list[tuple[UUID, UUID]] = field(default_factory=list)
 
-    def lookup(self, phone_e164: str) -> Recipient | None:
+    def lookup(self, phone_e164: str, tenant_id: UUID | None = None) -> Recipient | None:
         return self.by_phone.get(phone_e164)
+
+    def note_contact(
+        self, recipient: Recipient, tenant_id: UUID, basis_ref: str | None, now: datetime
+    ) -> None:
+        self.contacts.append((recipient.user_ref, tenant_id))
 
 
 @dataclass
