@@ -289,3 +289,21 @@ def test_unusual_timezones_rejected(client: TestClient) -> None:
             json={"timezone": tz, "verified_businesses_only": False, "night_mode": None, "rules": []},
         )
         assert r.status_code == 400, tz
+
+
+# Found in stage 6 by the TypeScript client's live test: refresh reset visibility to refresh time.
+
+
+def test_refresh_keeps_earlier_intents_visible(
+    client: TestClient, tenant: SeededTenant, clock: Clock
+) -> None:
+    user = AppUser(client, _phone())
+    intent_id = _intent(client, tenant, user.phone)
+    _deliver(clock)
+    assert client.get(f"/v1/me/intents/{intent_id}", headers=user.headers).status_code == 200
+    token = user.tokens["refresh_token"]
+    r = client.post("/v1/auth/refresh", json={"refresh_token": token, "device_signature": user.sign(token)})
+    assert r.status_code == 200, r.text
+    fresh = {"Authorization": f"Bearer {r.json()['access_token']}", "Accept-Language": "ar"}
+    assert client.get(f"/v1/me/intents/{intent_id}", headers=fresh).status_code == 200
+    assert len(client.get("/v1/inbox", headers=fresh).json()["items"]) == 1

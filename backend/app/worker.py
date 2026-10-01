@@ -69,6 +69,11 @@ def tick(now: datetime, publisher: outbox.Publisher, sender: webhooks.HttpSender
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="RingSays background worker")
+    parser.add_argument("--once", action="store_true", help="Run every job once, print result, exit")
+    args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     settings.assert_safe_for_environment()
     adapters.configure(directory=DbRecipientDirectory())
@@ -79,6 +84,11 @@ def main() -> None:
     else:
         publisher = outbox.NatsPublisher(settings.nats_url)
         sender = webhooks.HttpxSender()
+    if args.once:
+        import json
+
+        print(json.dumps(tick(datetime.now(UTC), publisher, sender)))
+        return
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
     while _running:

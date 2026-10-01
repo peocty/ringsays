@@ -287,7 +287,12 @@ def refresh(token: str, device_signature: str, now: datetime) -> Tokens:
         # Committed revocation above; tell caller after commit.
         raise AuthFailed("Refresh token reuse detected; all sessions on this device signed out")
     return Tokens(
-        _access(user_id, device_id, ph.phone_hash, now), new_refresh, ACCESS_TTL_S, user_id, device_id
+        # Visibility starts at account creation, never at refresh time (ADR 0009).
+        _access(user_id, device_id, ph.phone_hash, ph.created_at),
+        new_refresh,
+        ACCESS_TTL_S,
+        user_id,
+        device_id,
     )
 
 

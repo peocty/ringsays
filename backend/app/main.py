@@ -31,6 +31,10 @@ if settings.dev_oidc_enabled and settings.environment == "local":
     from app.modules.devoidc import api as devoidc_api
 
     app.include_router(devoidc_api.router)
+if settings.environment == "local" and settings.use_mock_adapters:
+    from app.modules.devtools import api as devtools_api
+
+    app.include_router(devtools_api.router)
 
 # Portal runs on its own origin. Bearer tokens (never cookies), so no credentials mode is needed.
 app.add_middleware(
