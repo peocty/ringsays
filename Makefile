@@ -48,7 +48,7 @@ seed:
 
 # Mock Bank (fictional bank using the SDK). Needs `make api` and a worker (cd backend && .venv/bin/python -m app.worker).
 bank-setup:
-	pnpm --filter @ringsays/react-native-sdk build && pnpm --filter @mockbank/server build && pnpm --filter @mockbank/server setup
+	pnpm --filter @ringsays/react-native-sdk build && pnpm --filter @mockbank/server build && pnpm --filter @mockbank/server run setup
 
 bank:
 	pnpm --filter @mockbank/server start

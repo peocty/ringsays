@@ -14,7 +14,7 @@ export interface Config {
 
 function need(name: string): string {
   const v = process.env[name];
-  if (!v) throw new Error(`${name} is not set (run: pnpm --filter @mockbank/server setup)`);
+  if (!v) throw new Error(`${name} is not set (run: pnpm --filter @mockbank/server run setup)`);
   return v;
 }
 
