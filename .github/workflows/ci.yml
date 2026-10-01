@@ -54,7 +54,8 @@ jobs:
       - name: Portal API types match admin contract
         run: pnpm --filter @ringsays/portal check:api-types
 
-  portal-e2e:
+  # Portal and mobile app (web build) end to end against one local API with MOCK adapters.
+  e2e:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -81,17 +82,26 @@ jobs:
           psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE ringsays OWNER ringsays_owner"
           cd backend && python -m venv .venv && .venv/bin/pip install -e ".[dev]" && .venv/bin/alembic upgrade head
       - name: Start API (local environment, MOCK sign in)
-        run: cd backend && nohup .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 > ../api.log 2>&1 &
+        # Every app sign in comes from one address here; lift the per address code limit for tests.
+        run: cd backend && RINGSAYS_OTP_PER_IP_PER_HOUR=100000 nohup .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 > ../api.log 2>&1 &
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @ringsays/portal build
       - run: pnpm --filter @ringsays/portal exec playwright install --with-deps chromium
       - run: pnpm --filter @ringsays/portal e2e
+      - name: Mobile app web build (MOCK push token so MOCK push delivers to the browser)
+        run: pnpm --filter @ringsays/client build && pnpm --filter @ringsays/mobile export:web
+        env:
+          EXPO_PUBLIC_RINGSAYS_API_BASE: http://127.0.0.1:8000
+          EXPO_PUBLIC_RINGSAYS_PREVIEW_PUSH_TOKEN: mock-web
+      - run: pnpm --filter @ringsays/mobile e2e
+        env: { E2E_PYTHON: "${{ github.workspace }}/backend/.venv/bin/python" }
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: portal-e2e
+          name: e2e
           path: |
             apps/portal/test-results
+            apps/mobile/test-results
             api.log
 
   security:

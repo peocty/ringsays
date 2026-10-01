@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
 
 /**
@@ -5,7 +6,7 @@ import { defineConfig, devices } from "@playwright/test";
  * Start the API first: `make up` or `cd backend && .venv/bin/uvicorn app.main:app --port 8000`.
  * The portal preview is started here.
  */
-const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH ?? (process.env.CI ? undefined : "/opt/pw-browsers/chromium");
+const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH ?? (existsSync("/opt/pw-browsers/chromium") ? "/opt/pw-browsers/chromium" : undefined);
 
 export default defineConfig({
   testDir: "./e2e",

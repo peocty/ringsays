@@ -27,3 +27,4 @@ apps/portal/playwright-report/
 apps/mobile/e2e/.seed.json
 apps/mobile/dist/
 apps/mobile/test-results/
+dump.rdb

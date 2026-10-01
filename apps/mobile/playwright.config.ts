@@ -1,3 +1,5 @@
+/// <reference types="node" />
+import { existsSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
 
 /**
@@ -5,7 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
  * Build first with a MOCK push token so the MOCK push provider delivers to it:
  *   EXPO_PUBLIC_RINGSAYS_PREVIEW_PUSH_TOKEN=mock-web pnpm export:web
  */
-const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH ?? (process.env.CI ? undefined : "/opt/pw-browsers/chromium");
+const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH ?? (existsSync("/opt/pw-browsers/chromium") ? "/opt/pw-browsers/chromium" : undefined);
 
 export default defineConfig({
   testDir: "./e2e",
