@@ -41,7 +41,14 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.portal_origins,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
-    allow_headers=["Authorization", "Content-Type", "Accept-Language", "If-Match", "Idempotency-Key"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept-Language",
+        "If-Match",
+        "Idempotency-Key",
+        "RingSays-Device-Id",
+    ],
     expose_headers=["ETag", "Content-Disposition"],
     max_age=600,
 )

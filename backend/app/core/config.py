@@ -67,6 +67,9 @@ class Settings(BaseSettings):
         # Mobile app web preview (Expo), local development and browser tests only.
         "http://localhost:8081",
         "http://127.0.0.1:8081",
+        # Mock bank customer app web preview (SDK sample, stage 7).
+        "http://localhost:8082",
+        "http://127.0.0.1:8082",
     ]
     portal_redirect_uris: list[str] = [
         "http://localhost:5173/auth/callback",
