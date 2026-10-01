@@ -95,11 +95,21 @@ def _open_request(conn: Connection) -> Any:
     ).one_or_none()
 
 
-def update_tenant(conn: Connection, m: Member, body: dict[str, Any], now: datetime) -> dict[str, Any]:
-    if m.tenant_status != "PENDING":
-        raise Conflict("Profile is locked after verification; contact RingSays to change it")
+def lock_pending_tenant(conn: Connection, tenant_id: UUID, what: str) -> Any:
+    """Lock the tenant row, then check it is pending and nothing is under review.
+
+    Submit and RingSays' decision lock the same row, so the check and the write that follows cannot
+    interleave with them. A database guard enforces the same rule (migration 0004)."""
+    t = conn.execute(select(tenants).where(tenants.c.id == tenant_id).with_for_update()).one()
+    if t.verification_status != "PENDING":
+        raise Conflict(f"{what} is locked after verification; contact RingSays to change it")
     if _open_request(conn) is not None:
-        raise Conflict("Profile is locked while verification is under review")
+        raise Conflict(f"{what} is locked while verification is under review")
+    return t
+
+
+def update_tenant(conn: Connection, m: Member, body: dict[str, Any], now: datetime) -> dict[str, Any]:
+    lock_pending_tenant(conn, m.tenant_id, "Profile")
     values: dict[str, Any] = {}
     if "legal_name" in body:
         values["legal_name_en"] = body["legal_name"]["en"]
@@ -181,7 +191,17 @@ def create_agent(conn: Connection, m: Member, body: dict[str, Any], now: datetim
     exists = conn.execute(select(agents.c.agent_id).where(agents.c.agent_id == body["agent_id"])).first()
     if exists:
         raise Conflict(f"Agent {body['agent_id']} already exists")
-    row = conn.execute(
+    try:
+        with conn.begin_nested():
+            row = _insert_agent(conn, m, body)
+    except IntegrityError as exc:
+        raise Conflict(f"Agent {body['agent_id']} already exists") from exc
+    _audit(conn, m, "agent.create", "agent", body["agent_id"], now)
+    return _agent_out(row)
+
+
+def _insert_agent(conn: Connection, m: Member, body: dict[str, Any]) -> Any:
+    return conn.execute(
         insert(agents)
         .values(
             tenant_id=m.tenant_id,
@@ -194,8 +214,6 @@ def create_agent(conn: Connection, m: Member, body: dict[str, Any], now: datetim
         )
         .returning(*agents.c)
     ).one()
-    _audit(conn, m, "agent.create", "agent", body["agent_id"], now)
-    return _agent_out(row)
 
 
 def update_agent(
@@ -340,60 +358,57 @@ def safe_file_name(name: str | None) -> str:
     return cleaned[:200]
 
 
-def upload_document(
+def validate_document(data: bytes) -> str:
+    """Content type from the bytes (never the client's claim). Called before anything is stored."""
+    if not data or len(data) > MAX_DOCUMENT_BYTES:
+        raise RuleViolation("File must be between 1 byte and 5 MB")
+    content_type = blobs.sniff_content_type(data)
+    if content_type is None:
+        raise RuleViolation("File must be a PDF, PNG or JPEG")
+    return content_type
+
+
+def record_document(
     conn: Connection,
     m: Member,
     kind: str,
     reference: str | None,
     file_name: str | None,
     data: bytes,
+    content_type: str,
+    blob_key: str,
     now: datetime,
 ) -> dict[str, Any]:
-    if m.tenant_status != "PENDING":
-        raise Conflict("Organisation is already verified")
-    if _open_request(conn) is not None:
-        raise Conflict("Evidence is locked while verification is under review")
-    if not data or len(data) > MAX_DOCUMENT_BYTES:
-        raise RuleViolation("File must be between 1 byte and 5 MB")
-    content_type = blobs.sniff_content_type(data)
-    if content_type is None:
-        raise RuleViolation("File must be a PDF, PNG or JPEG")
+    """Row for a blob already stored. Caller deletes the blob if this transaction does not commit."""
+    lock_pending_tenant(conn, m.tenant_id, "Evidence")
     count = conn.execute(select(func.count()).select_from(verification_documents)).scalar_one()
     if count >= MAX_DOCUMENTS:
         raise Conflict(f"At most {MAX_DOCUMENTS} documents; remove one first")
-    key = blobs.get_store().put(data)
     doc_id = uuid4()
-    try:
-        row = conn.execute(
-            insert(verification_documents)
-            .values(
-                id=doc_id,
-                tenant_id=m.tenant_id,
-                kind=kind,
-                reference=reference or None,
-                file_name=safe_file_name(file_name),
-                content_type=content_type,
-                size_bytes=len(data),
-                sha256=hashlib.sha256(data).hexdigest(),
-                blob_key=key,
-                uploaded_by=m.actor,
-                uploaded_at=now,
-            )
-            .returning(*verification_documents.c)
-        ).one()
-    except Exception:
-        blobs.get_store().delete(key)
-        raise
+    row = conn.execute(
+        insert(verification_documents)
+        .values(
+            id=doc_id,
+            tenant_id=m.tenant_id,
+            kind=kind,
+            reference=reference or None,
+            file_name=safe_file_name(file_name),
+            content_type=content_type,
+            size_bytes=len(data),
+            sha256=hashlib.sha256(data).hexdigest(),
+            blob_key=blob_key,
+            uploaded_by=m.actor,
+            uploaded_at=now,
+        )
+        .returning(*verification_documents.c)
+    ).one()
     _audit(conn, m, "verification.document_upload", "verification_document", str(doc_id), now)
     return doc_out(row)
 
 
 def delete_document(conn: Connection, m: Member, doc_id: UUID, now: datetime) -> str:
     """Returns blob key; caller deletes blob after commit."""
-    if _open_request(conn) is not None:
-        raise Conflict("Evidence is locked while verification is under review")
-    if m.tenant_status != "PENDING":
-        raise Conflict("Evidence of a verified organisation is kept as record")
+    lock_pending_tenant(conn, m.tenant_id, "Evidence")
     row = conn.execute(
         text("DELETE FROM enterprise.verification_documents WHERE id = :i RETURNING blob_key"), {"i": doc_id}
     ).one_or_none()
@@ -470,30 +485,43 @@ def _check_agent_link(conn: Connection, roles: list[str], agent_id: str | None) 
 
 
 def invite_user(conn: Connection, m: Member, body: dict[str, Any], now: datetime) -> dict[str, Any]:
+    """Invite by email. Inviting again an email whose invitation was never accepted renews it."""
     email = body["email"].strip().lower()
     roles = sorted(set(body["roles"]))
     _check_agent_link(conn, roles, body.get("agent_id"))
-    exists = conn.execute(select(portal_users.c.id).where(portal_users.c.email == email)).first()
-    if exists:
-        raise Conflict("This email is already a member or invited")
-    user_id = uuid4()
-    row = conn.execute(
-        insert(portal_users)
-        .values(
-            id=user_id,
-            tenant_id=m.tenant_id,
-            email=email,
-            display_name=body.get("display_name"),
-            roles=roles,
-            agent_id=body.get("agent_id"),
-            status="INVITED",
-            invited_by=m.actor,
-            invite_expires_at=now + timedelta(days=settings.invite_ttl_days),
-            created_at=now,
-        )
-        .returning(*portal_users.c)
-    ).one()
-    _audit(conn, m, "portal_user.invite", "portal_user", str(user_id), now, reason=",".join(roles))
+    conn.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"portal_users:{m.tenant_id}"})
+    existing = conn.execute(select(portal_users).where(portal_users.c.email == email)).one_or_none()
+    expires = now + timedelta(days=settings.invite_ttl_days)
+    values = {
+        "display_name": body.get("display_name"),
+        "roles": roles,
+        "agent_id": body.get("agent_id"),
+        "status": "INVITED",
+        "invited_by": m.actor,
+        "invite_expires_at": expires,
+    }
+    if existing is not None:
+        if existing.oidc_subject is not None or existing.status != "INVITED":
+            raise Conflict("This email is already a member")
+        row = conn.execute(
+            update(portal_users)
+            .where(portal_users.c.id == existing.id)
+            .values(**values)
+            .returning(*portal_users.c)
+        ).one()
+        action = "portal_user.reinvite"
+    else:
+        try:
+            with conn.begin_nested():
+                row = conn.execute(
+                    insert(portal_users)
+                    .values(id=uuid4(), tenant_id=m.tenant_id, email=email, created_at=now, **values)
+                    .returning(*portal_users.c)
+                ).one()
+        except IntegrityError as exc:
+            raise Conflict("This email is already a member or invited") from exc
+        action = "portal_user.invite"
+    _audit(conn, m, action, "portal_user", str(row.id), now, reason=",".join(roles))
     return user_out(row)
 
 
@@ -508,8 +536,9 @@ def update_user(
     roles = sorted(set(body.get("roles", row.roles)))
     status = body.get("status", row.status)
     agent_id = body["agent_id"] if "agent_id" in body else row.agent_id
-    if user_id == m.user_id and (status == "DISABLED" or "TENANT_ADMIN" not in roles):
-        raise Conflict("You cannot disable yourself or remove your own administrator role")
+    if user_id == m.user_id and (status == "DISABLED" or roles != sorted(row.roles)):
+        # Another administrator must change your roles, so no one can grant themselves more access.
+        raise Conflict("You cannot disable yourself or change your own roles")
     if status == "ACTIVE" and row.oidc_subject is None:
         raise Conflict("This person has not accepted the invitation yet")
     _check_agent_link(conn, roles, agent_id)

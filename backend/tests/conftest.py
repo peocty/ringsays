@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import os
+
+# Settings fail closed (production) unless told otherwise; tests run the local, MOCK configuration.
+os.environ.setdefault("RINGSAYS_ENVIRONMENT", "local")
+
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 

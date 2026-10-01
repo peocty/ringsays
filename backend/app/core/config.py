@@ -14,7 +14,9 @@ LOCAL_BACKOFFICE_PASSWORD = "ringsays_backoffice:ringsays_backoffice@"  # noqa: 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="RINGSAYS_", env_file=".env", extra="ignore")
 
-    environment: str = "local"
+    # Fails closed: without RINGSAYS_ENVIRONMENT=local the safety checks below run, so a forgotten
+    # variable can never expose MOCK sign in or local secrets.
+    environment: str = "production"
     residency_region: str = "KSA"
 
     # API runtime connects as ringsays_app (row level security enforced).
@@ -51,7 +53,12 @@ class Settings(BaseSettings):
     staff_oidc_issuer: str = DEV_OIDC_ISSUER
     staff_oidc_jwks_url: str | None = None
     admin_oidc_audience: str = "ringsays-admin-api"
-    dev_oidc_enabled: bool = True
+    # Identity providers that do not send email_verified but only issue tokens for accounts whose email
+    # they control (for example a bank's own Microsoft Entra ID tenant). Their emails count as verified.
+    oidc_email_trusted_issuers: list[str] = []
+    # MOCK sign in. Unset means: on in local environment only.
+    dev_oidc_enabled: bool | None = None
+    dev_oidc_token_ttl_s: int = 900  # MOCK issuer access token lifetime (short, like bank identity providers)
     portal_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
@@ -66,6 +73,7 @@ class Settings(BaseSettings):
     ]
     # Verification evidence. Local: files on disk (MOCK object storage). Production: S3 compatible
     # storage in region with server side encryption.
+    blob_backend: str = "local"
     blob_dir: str = ".local/blobs"
     api_clients_max_active: int = 10
     webhook_endpoints_max_active: int = 5
@@ -79,6 +87,10 @@ class Settings(BaseSettings):
     otp_per_ip_per_hour: int = 30
     otp_global_per_minute: int = 600
     otp_failures_per_phone_per_day: int = 10
+
+    def model_post_init(self, __context: object) -> None:
+        if self.dev_oidc_enabled is None:
+            self.dev_oidc_enabled = self.environment == "local"
 
     def assert_safe_for_environment(self) -> None:
         if self.environment == "local":
@@ -96,6 +108,8 @@ class Settings(BaseSettings):
             )
         if DEV_OIDC_ISSUER in (self.admin_oidc_issuer, self.staff_oidc_issuer):
             raise RuntimeError("RINGSAYS_ADMIN_OIDC_ISSUER and RINGSAYS_STAFF_OIDC_ISSUER must be set")
+        if self.environment == "production" and self.blob_backend == "local":
+            raise RuntimeError("RINGSAYS_BLOB_BACKEND must be object storage in production, not local disk")
         if self.backoffice_enabled and LOCAL_BACKOFFICE_PASSWORD in self.backoffice_database_url:
             raise RuntimeError("RINGSAYS_BACKOFFICE_DATABASE_URL must be set when back office is enabled")
         if self.environment == "production" and self.use_mock_adapters:

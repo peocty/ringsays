@@ -654,7 +654,7 @@ def test_monitor_masks_filters_and_scopes_agents(
     assert phone not in client.get(f"{_t(tenant)}/intents", headers=h).text
     item = next(i for i in page["items"] if i["intent_id"] == mine)
     assert item["to_masked"] == phone[:5] + "•••••" + phone[-3:]
-    by_phone = client.get(f"{_t(tenant)}/intents", params={"phone": phone}, headers=h).json()["items"]
+    by_phone = client.post(f"{_t(tenant)}/intents/search", json={"phone": phone}, headers=h).json()["items"]
     assert [i["intent_id"] for i in by_phone] == [mine]
     by_status = client.get(f"{_t(tenant)}/intents?status=REQUESTED,CANCELLED", headers=h).json()["items"]
     assert len(by_status) == 2
@@ -698,12 +698,9 @@ def test_user_admin_rules(
     email = unique_email("new")
     r = client.post(f"{_t(tenant)}/users", json={"email": email.upper(), "roles": ["SUPERVISOR"]}, headers=h)
     assert r.status_code == 201 and r.json()["status"] == "INVITED" and r.json()["email"] == email
-    assert (
-        client.post(
-            f"{_t(tenant)}/users", json={"email": email, "roles": ["SUPERVISOR"]}, headers=h
-        ).status_code
-        == 409
-    )
+    # Inviting again before acceptance renews the invitation.
+    renewed = client.post(f"{_t(tenant)}/users", json={"email": email, "roles": ["SUPERVISOR"]}, headers=h)
+    assert renewed.status_code == 201 and renewed.json()["user_id"] == r.json()["user_id"]
     no_agent = client.post(
         f"{_t(tenant)}/users", json={"email": unique_email(), "roles": ["AGENT"]}, headers=h
     )

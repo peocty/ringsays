@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Connection, insert, select, update
+from sqlalchemy import Connection, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.core import auth
@@ -29,7 +29,7 @@ from app.platform import blobs
 
 from .access import Conflict, NotFound, Staff
 from .integration import code_out
-from .org import doc_out, number_out, request_out, tenant_out
+from .org import doc_out, number_out, request_out, required_kinds, tenant_out
 
 
 def _audit(
@@ -227,6 +227,23 @@ def decide_verification(
         raise Conflict("This request has already been decided")
     tenant = _tenant_for_update(conn, req.tenant_id)
     status = "APPROVED" if decision == "APPROVE" else "REJECTED"
+    if status == "APPROVED":
+        # Approve only what was submitted: every referenced document still exists and covers the
+        # required kinds (database guard also stops removal while under review).
+        kinds = {
+            r.kind
+            for r in conn.execute(
+                select(verification_documents.c.kind).where(verification_documents.c.id.in_(req.document_ids))
+            ).all()
+        }
+        present = conn.execute(
+            select(func.count())
+            .select_from(verification_documents)
+            .where(verification_documents.c.id.in_(req.document_ids))
+        ).scalar_one()
+        missing = [k for k in required_kinds(tenant.sector) if k not in kinds]
+        if present != len(req.document_ids) or missing:
+            raise Conflict("Submitted evidence is incomplete; reject and ask the organisation to resubmit")
     row = conn.execute(
         update(verification_requests)
         .where(verification_requests.c.id == request_id)
@@ -250,7 +267,8 @@ def decide_verification(
     return request_out(row)
 
 
-def document_file(conn: Connection, document_id: UUID) -> tuple[bytes, str, str]:
+def document_file(conn: Connection, s: Staff, document_id: UUID, now: datetime) -> tuple[bytes, str, str]:
+    """Evidence download. Recorded in the organisation's own audit log, so it sees who looked."""
     row = conn.execute(
         select(verification_documents)
         .join(tenants, tenants.c.id == verification_documents.c.tenant_id)
@@ -261,7 +279,17 @@ def document_file(conn: Connection, document_id: UUID) -> tuple[bytes, str, str]
     ).one_or_none()
     if row is None:
         raise NotFound("Document not found")
-    return blobs.get_store().get(row.blob_key), row.content_type, row.file_name
+    data = blobs.get_store().get(row.blob_key)
+    _audit(
+        conn,
+        s,
+        row.tenant_id,
+        "verification.document_download",
+        "verification_document",
+        str(document_id),
+        now,
+    )
+    return data, row.content_type, row.file_name
 
 
 def decide_purpose_code(

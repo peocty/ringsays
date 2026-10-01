@@ -138,6 +138,7 @@ def test_admin_responses_match_contract(
     call("get", f"{t}/intents", 200)
     call("get", f"{t}/intents?status=DELIVERED", 200)
     call("get", f"{t}/intents/summary", 200)
+    call("post", f"{t}/intents/search", 200, {"phone": user.phone, "status": ["DELIVERED", "REQUESTED"]})
     call("get", f"{t}/intents/{intent_id}", 200)
     call("get", f"{t}/intents/{uuid4()}", 404)
     call("get", f"{t}/audit-events", 200)

@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core import auth, problems
 from app.core.config import settings
+from app.core.limits import RequestLimits
 from app.modules.admin import api as admin_api
 from app.modules.admin import backoffice_api
 from app.modules.client import api as client_api
@@ -40,6 +41,8 @@ app.add_middleware(
     expose_headers=["ETag", "Content-Disposition"],
     max_age=600,
 )
+# Outermost: limits apply before CORS, routing, authentication and body parsing.
+app.add_middleware(RequestLimits)
 
 
 @app.get("/health", tags=["Ops"])

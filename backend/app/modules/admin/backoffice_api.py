@@ -91,9 +91,9 @@ def decide_verification(request_id: UUID, body: DecisionIn, s: Reviewer, now: No
 
 
 @router.get("/review/documents/{document_id}/file")
-def download_document(document_id: UUID, s: AnyStaff) -> Response:
+def download_document(document_id: UUID, s: AnyStaff, now: Now) -> Response:
     with backoffice_tx() as conn:
-        data, content_type, name = backoffice.document_file(conn, document_id)
+        data, content_type, name = backoffice.document_file(conn, s, document_id, now)
     return Response(
         data,
         media_type=content_type,

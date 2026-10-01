@@ -14,10 +14,16 @@ from app.core.config import DEV_OIDC_ISSUER, settings
 from . import issuer
 
 router = APIRouter(prefix="/dev/oidc", tags=["MOCK sign in"], include_in_schema=False)
+
+
 def _csp() -> str:
     # form-action also governs where the form's redirect may go, so allow the portal origins.
-    origins = " ".join(sorted({f"{u.scheme}://{u.netloc}" for u in map(urlsplit, settings.portal_redirect_uris)}))
-    return f"default-src 'none'; style-src 'unsafe-inline'; form-action 'self' {origins}; frame-ancestors 'none'"
+    origins = " ".join(
+        sorted({f"{u.scheme}://{u.netloc}" for u in map(urlsplit, settings.portal_redirect_uris)})
+    )
+    return (
+        f"default-src 'none'; style-src 'unsafe-inline'; form-action 'self' {origins}; frame-ancestors 'none'"
+    )
 
 
 @router.get("/.well-known/openid-configuration")
@@ -29,11 +35,11 @@ def discovery() -> dict[str, object]:
         "jwks_uri": f"{DEV_OIDC_ISSUER}/jwks",
         "end_session_endpoint": f"{DEV_OIDC_ISSUER}/logout",
         "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
         "subject_types_supported": ["public"],
         "id_token_signing_alg_values_supported": ["RS256"],
         "code_challenge_methods_supported": ["S256"],
-        "scopes_supported": ["openid", "email", "profile"],
+        "scopes_supported": ["openid", "email", "profile", "offline_access"],
         "token_endpoint_auth_methods_supported": ["none"],
     }
 
@@ -123,15 +129,19 @@ def authorize_submit(
 @router.post("/token")
 def token(
     grant_type: Annotated[str, Form()],
-    code: Annotated[str, Form()],
-    redirect_uri: Annotated[str, Form()],
     client_id: Annotated[str, Form()],
-    code_verifier: Annotated[str, Form()],
+    code: Annotated[str | None, Form()] = None,
+    redirect_uri: Annotated[str | None, Form()] = None,
+    code_verifier: Annotated[str | None, Form()] = None,
+    refresh_token: Annotated[str | None, Form()] = None,
 ) -> JSONResponse:
-    if grant_type != "authorization_code":
-        return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
     try:
-        body = issuer.exchange(code, redirect_uri, client_id, code_verifier)
+        if grant_type == "authorization_code" and code and redirect_uri and code_verifier:
+            body = issuer.exchange(code, redirect_uri, client_id, code_verifier)
+        elif grant_type == "refresh_token" and refresh_token:
+            body = issuer.refresh(refresh_token, client_id)
+        else:
+            return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
     except issuer.TokenError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     return JSONResponse(body, headers={"Cache-Control": "no-store"})

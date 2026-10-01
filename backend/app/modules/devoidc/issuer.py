@@ -25,8 +25,12 @@ from app.core.config import DEV_OIDC_ISSUER, settings
 
 CLIENT_ID = "ringsays-portal"
 KID = "mock-1"
-TOKEN_TTL_S = 3600
 CODE_TTL_S = 60
+REFRESH_TTL_S = 8 * 3600
+
+
+def token_ttl_s() -> int:
+    return settings.dev_oidc_token_ttl_s
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +62,15 @@ class _Code:
     expires: float
 
 
+@dataclass(frozen=True, slots=True)
+class _Refresh:
+    email: str
+    name: str
+    expires: float
+
+
 _codes: dict[str, _Code] = {}
+_refresh: dict[str, _Refresh] = {}
 _lock = threading.Lock()
 
 
@@ -108,7 +120,26 @@ def exchange(code: str, redirect_uri: str, client_id: str, code_verifier: str) -
     digest = base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest()).rstrip(b"=").decode()
     if not secrets.compare_digest(digest, entry.code_challenge):
         raise TokenError("invalid_grant")
-    return tokens_for(entry.email, entry.name, entry.nonce)
+    return {
+        **tokens_for(entry.email, entry.name, entry.nonce),
+        "refresh_token": _new_refresh(entry.email, entry.name),
+    }
+
+
+def _new_refresh(email: str, name: str) -> str:
+    token = secrets.token_urlsafe(32)
+    with _lock:
+        _refresh[token] = _Refresh(email, name, time.time() + REFRESH_TTL_S)
+    return token
+
+
+def refresh(token: str, client_id: str) -> dict[str, Any]:
+    """Rotating refresh: each refresh token works once."""
+    with _lock:
+        entry = _refresh.pop(token, None)
+    if entry is None or entry.expires < time.time() or client_id != CLIENT_ID:
+        raise TokenError("invalid_grant")
+    return {**tokens_for(entry.email, entry.name), "refresh_token": _new_refresh(entry.email, entry.name)}
 
 
 def tokens_for(email: str, name: str | None = None, nonce: str | None = None) -> dict[str, Any]:
@@ -118,7 +149,7 @@ def tokens_for(email: str, name: str | None = None, nonce: str | None = None) ->
         "iss": DEV_OIDC_ISSUER,
         "sub": subject_for(email),
         "iat": now,
-        "exp": now + TOKEN_TTL_S,
+        "exp": now + token_ttl_s(),
         "email": email.lower(),
         "email_verified": True,
         "name": name or email,
@@ -138,6 +169,6 @@ def tokens_for(email: str, name: str | None = None, nonce: str | None = None) ->
         "access_token": access,
         "id_token": id_token,
         "token_type": "Bearer",
-        "expires_in": TOKEN_TTL_S,
+        "expires_in": token_ttl_s(),
         "scope": "openid email profile",
     }

@@ -6,7 +6,7 @@ from __future__ import annotations
 import csv
 import io
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -247,18 +247,21 @@ EXPORT_FIELDS = [
     "reason",
     "prev_hash",
     "hash",
+    "escaped_fields",
 ]
+TEXT_FIELDS = ("actor", "action", "object_type", "object_id", "reason")
 
 
-def _safe_cell(value: str) -> str:
-    """Stop spreadsheet formula injection when the CSV is opened in Excel."""
-    return "'" + value if value[:1] in ("=", "+", "-", "@", "\t", "\r") else value
+def _needs_escape(value: str) -> bool:
+    return value[:1] in ("=", "+", "-", "@", "\t", "\r")
 
 
 def export_audit_rows(tenant_id: UUID, batch: int = 1000) -> Iterator[str]:
-    """CSV lines, oldest first, read in batches (one short transaction each) so a long log never sits in
-    memory. Text cells starting with = + - @ get a leading apostrophe against spreadsheet formula
-    injection; remove it before recomputing a hash. Ids, times and hashes are never altered."""
+    """CSV lines, oldest first, read in batches (one short transaction each).
+
+    Values are exactly those the hash covers: `at` is UTC with microseconds, as in the hash. Text cells
+    that a spreadsheet would run as a formula get one leading apostrophe, and the column
+    `escaped_fields` names those cells, so the original value is recoverable without guessing."""
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(EXPORT_FIELDS)
@@ -277,17 +280,22 @@ def export_audit_rows(tenant_id: UUID, batch: int = 1000) -> Iterator[str]:
         buf.seek(0)
         buf.truncate()
         for r in rows:
+            values = {f: getattr(r, f) or "" for f in TEXT_FIELDS}
+            escaped = [f for f in TEXT_FIELDS if _needs_escape(values[f])]
+            for f in escaped:
+                values[f] = "'" + values[f]
             writer.writerow(
                 [
                     str(r.event_id),
-                    r.at.isoformat(),
-                    _safe_cell(r.actor),
-                    _safe_cell(r.action),
-                    _safe_cell(r.object_type),
-                    _safe_cell(r.object_id),
-                    _safe_cell(r.reason or ""),
+                    r.at.astimezone(UTC).isoformat(timespec="microseconds"),
+                    values["actor"],
+                    values["action"],
+                    values["object_type"],
+                    values["object_id"],
+                    values["reason"],
                     r.prev_hash,
                     r.hash,
+                    " ".join(escaped),
                 ]
             )
         yield buf.getvalue()

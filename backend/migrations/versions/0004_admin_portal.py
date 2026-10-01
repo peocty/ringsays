@@ -126,29 +126,44 @@ CREATE UNIQUE INDEX verification_one_open ON enterprise.verification_requests (t
 CREATE INDEX verification_queue_idx ON enterprise.verification_requests (submitted_at)
     WHERE status = 'SUBMITTED';
 
--- Guard: what the tenant facing role may do to reviewed rows.
+-- Guards: what any role other than the owner (migrations, seed) and the back office may do.
+-- They raise SQLSTATE RSG01, which the API maps to 409; a real permission error stays a 500.
+-- Allow list, not deny list: a login role that is a member of ringsays_app is guarded too.
+CREATE FUNCTION enterprise.guard_trusted_role() RETURNS boolean LANGUAGE sql STABLE AS $$
+    SELECT current_user IN ('ringsays_owner', 'ringsays_backoffice')
+$$;
+
 CREATE FUNCTION enterprise.guard_reviewed() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF current_user <> 'ringsays_app' THEN
+    IF enterprise.guard_trusted_role() THEN
         RETURN NEW;
     END IF;
     IF TG_TABLE_NAME = 'purpose_codes' THEN
         IF TG_OP = 'INSERT' AND (NEW.status <> 'PENDING_REVIEW' OR NEW.reviewed_at IS NOT NULL) THEN
-            RAISE EXCEPTION 'new purpose codes must enter review' USING ERRCODE = '42501';
+            RAISE EXCEPTION 'new purpose codes must enter review' USING ERRCODE = 'RSG01';
         END IF;
         IF TG_OP = 'UPDATE' AND NEW.status IS DISTINCT FROM OLD.status AND NEW.status <> 'RETIRED' THEN
-            RAISE EXCEPTION 'tenant may only retire a purpose code' USING ERRCODE = '42501';
+            RAISE EXCEPTION 'tenant may only retire a purpose code' USING ERRCODE = 'RSG01';
         END IF;
     ELSIF TG_TABLE_NAME = 'calling_numbers' THEN
         IF TG_OP = 'INSERT' AND (NEW.status <> 'PENDING_VERIFICATION' OR NEW.reviewed_at IS NOT NULL) THEN
-            RAISE EXCEPTION 'new calling numbers must enter verification' USING ERRCODE = '42501';
+            RAISE EXCEPTION 'new calling numbers must enter verification' USING ERRCODE = 'RSG01';
         END IF;
         IF TG_OP = 'UPDATE' AND NEW.status IS DISTINCT FROM OLD.status AND NEW.status <> 'REVOKED' THEN
-            RAISE EXCEPTION 'tenant may only revoke a calling number' USING ERRCODE = '42501';
+            RAISE EXCEPTION 'tenant may only revoke a calling number' USING ERRCODE = 'RSG01';
         END IF;
     ELSIF TG_TABLE_NAME = 'verification_requests' THEN
         IF TG_OP = 'INSERT' AND (NEW.status <> 'SUBMITTED' OR NEW.decided_by IS NOT NULL) THEN
-            RAISE EXCEPTION 'verification requests start as submitted' USING ERRCODE = '42501';
+            RAISE EXCEPTION 'verification requests start as submitted' USING ERRCODE = 'RSG01';
+        END IF;
+    ELSIF TG_TABLE_NAME = 'tenants' THEN
+        -- Profile is what RingSays verified; it may change only while pending and not under review.
+        IF (NEW.legal_name_en, NEW.legal_name_ar, NEW.cr_number, NEW.domain)
+           IS DISTINCT FROM (OLD.legal_name_en, OLD.legal_name_ar, OLD.cr_number, OLD.domain)
+           AND (OLD.verification_status <> 'PENDING' OR EXISTS (
+                SELECT 1 FROM enterprise.verification_requests r
+                 WHERE r.tenant_id = OLD.id AND r.status = 'SUBMITTED')) THEN
+            RAISE EXCEPTION 'profile is locked' USING ERRCODE = 'RSG01';
         END IF;
     END IF;
     RETURN NEW;
@@ -159,31 +174,63 @@ CREATE TRIGGER guard_reviewed BEFORE INSERT OR UPDATE ON enterprise.calling_numb
     FOR EACH ROW EXECUTE FUNCTION enterprise.guard_reviewed();
 CREATE TRIGGER guard_reviewed BEFORE INSERT ON enterprise.verification_requests
     FOR EACH ROW EXECUTE FUNCTION enterprise.guard_reviewed();
+CREATE TRIGGER guard_reviewed BEFORE UPDATE ON enterprise.tenants
+    FOR EACH ROW EXECUTE FUNCTION enterprise.guard_reviewed();
+
+-- Evidence may be added or removed only while the tenant is pending and nothing is under review,
+-- and evidence a request refers to is never removed (the reviewer decided on it).
+CREATE FUNCTION enterprise.guard_evidence() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    t uuid := coalesce(NEW.tenant_id, OLD.tenant_id);
+BEGIN
+    IF enterprise.guard_trusted_role() THEN
+        RETURN coalesce(NEW, OLD);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM enterprise.tenants x WHERE x.id = t AND x.verification_status = 'PENDING')
+       OR EXISTS (SELECT 1 FROM enterprise.verification_requests r
+                   WHERE r.tenant_id = t AND r.status = 'SUBMITTED') THEN
+        RAISE EXCEPTION 'evidence is locked' USING ERRCODE = 'RSG01';
+    END IF;
+    IF TG_OP = 'DELETE' AND EXISTS (
+        SELECT 1 FROM enterprise.verification_requests r
+         WHERE r.tenant_id = t AND r.status IN ('SUBMITTED', 'APPROVED') AND OLD.id = ANY (r.document_ids)) THEN
+        RAISE EXCEPTION 'evidence is referenced by a request' USING ERRCODE = 'RSG01';
+    END IF;
+    RETURN coalesce(NEW, OLD);
+END $$;
+CREATE TRIGGER guard_evidence BEFORE INSERT OR DELETE ON enterprise.verification_documents
+    FOR EACH ROW EXECUTE FUNCTION enterprise.guard_evidence();
 
 -- Sign in: bind invitations for a verified email, then return memberships for this identity.
 -- Runs before any tenant is known, so it is a security definer function returning only rows that
 -- belong to the caller's own identity (issuer and subject from a verified token).
 CREATE FUNCTION enterprise.portal_sign_in(
     p_issuer text, p_subject text, p_email text, p_email_verified boolean, p_now timestamptz)
-RETURNS TABLE (user_id uuid, tenant_id uuid, roles text[], agent_id text, display_name text)
+RETURNS TABLE (user_id uuid, tenant_id uuid, roles text[], agent_id text, display_name text,
+               newly_bound boolean)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = enterprise, pg_temp AS $$
+DECLARE
+    bound uuid[] := '{}';
 BEGIN
     IF p_issuer IS NULL OR p_subject IS NULL OR length(p_subject) = 0 THEN
         RETURN;
     END IF;
     IF p_email_verified AND p_email IS NOT NULL THEN
-        UPDATE enterprise.portal_users u
-           SET oidc_issuer = p_issuer, oidc_subject = p_subject, status = 'ACTIVE'
-         WHERE u.email = lower(p_email) AND u.status = 'INVITED' AND u.oidc_subject IS NULL
-           AND (u.invite_expires_at IS NULL OR u.invite_expires_at > p_now)
-           AND NOT EXISTS (SELECT 1 FROM enterprise.portal_users o
-                            WHERE o.tenant_id = u.tenant_id AND o.oidc_issuer = p_issuer
-                              AND o.oidc_subject = p_subject);
+        WITH b AS (
+            UPDATE enterprise.portal_users u
+               SET oidc_issuer = p_issuer, oidc_subject = p_subject, status = 'ACTIVE'
+             WHERE u.email = lower(p_email) AND u.status = 'INVITED' AND u.oidc_subject IS NULL
+               AND (u.invite_expires_at IS NULL OR u.invite_expires_at > p_now)
+               AND NOT EXISTS (SELECT 1 FROM enterprise.portal_users o
+                                WHERE o.tenant_id = u.tenant_id AND o.oidc_issuer = p_issuer
+                                  AND o.oidc_subject = p_subject)
+            RETURNING u.id)
+        SELECT coalesce(array_agg(b.id), '{}') INTO bound FROM b;
     END IF;
     UPDATE enterprise.portal_users u SET last_sign_in_at = p_now
      WHERE u.oidc_issuer = p_issuer AND u.oidc_subject = p_subject AND u.status = 'ACTIVE';
     RETURN QUERY
-        SELECT u.id, u.tenant_id, u.roles, u.agent_id, u.display_name
+        SELECT u.id, u.tenant_id, u.roles, u.agent_id, u.display_name, u.id = ANY (bound)
           FROM enterprise.portal_users u
          WHERE u.oidc_issuer = p_issuer AND u.oidc_subject = p_subject AND u.status = 'ACTIVE'
          ORDER BY u.created_at;
@@ -269,7 +316,8 @@ GRANT UPDATE (status) ON enterprise.calling_numbers TO ringsays_app;
 REVOKE UPDATE ON enterprise.purpose_codes FROM ringsays_app;
 GRANT UPDATE (status) ON enterprise.purpose_codes TO ringsays_app;
 GRANT SELECT, INSERT ON enterprise.portal_users TO ringsays_app;
-GRANT UPDATE (roles, agent_id, status, display_name) ON enterprise.portal_users TO ringsays_app;
+GRANT UPDATE (roles, agent_id, status, display_name, invited_by, invite_expires_at)
+    ON enterprise.portal_users TO ringsays_app;
 GRANT SELECT, INSERT, DELETE ON enterprise.verification_documents TO ringsays_app;
 GRANT SELECT, INSERT ON enterprise.verification_requests TO ringsays_app;
 GRANT SELECT ON platform.webhook_deliveries TO ringsays_app;
@@ -313,10 +361,19 @@ DROP FUNCTION enterprise.revoke_tenant_api_client(text, timestamptz);
 DROP FUNCTION enterprise.create_tenant_api_client(text, text, text[], text, text, integer);
 DROP FUNCTION enterprise.tenant_api_clients();
 DROP FUNCTION enterprise.portal_sign_in(text, text, text, boolean, timestamptz);
+DROP TRIGGER guard_evidence ON enterprise.verification_documents;
+DROP FUNCTION enterprise.guard_evidence();
+DROP TRIGGER guard_reviewed ON enterprise.tenants;
 DROP TRIGGER guard_reviewed ON enterprise.verification_requests;
 DROP TRIGGER guard_reviewed ON enterprise.calling_numbers;
 DROP TRIGGER guard_reviewed ON enterprise.purpose_codes;
 DROP FUNCTION enterprise.guard_reviewed();
+DROP FUNCTION enterprise.guard_trusted_role();
+REVOKE UPDATE (legal_name_en, legal_name_ar, cr_number, domain) ON enterprise.tenants FROM ringsays_app;
+REVOKE INSERT, UPDATE ON enterprise.departments FROM ringsays_app;
+REVOKE INSERT, UPDATE ON enterprise.agents FROM ringsays_app;
+REVOKE INSERT, UPDATE ON enterprise.calling_numbers FROM ringsays_app;
+REVOKE SELECT ON enterprise.tenants FROM ringsays_worker;
 DROP TABLE enterprise.verification_requests;
 DROP TABLE enterprise.verification_documents;
 DROP TABLE platform.staff_users;

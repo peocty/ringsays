@@ -35,6 +35,7 @@ services:
     build: ../../backend
     command: ["alembic", "upgrade", "head"]
     environment:
+      RINGSAYS_ENVIRONMENT: local
       RINGSAYS_MIGRATION_DATABASE_URL: postgresql+psycopg://ringsays_owner:ringsays_owner@postgres:5432/ringsays
     depends_on:
       postgres: { condition: service_healthy }

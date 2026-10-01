@@ -194,7 +194,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Upload evidence (PDF, PNG or JPEG, at most 5 MB) */
+        /**
+         * Upload evidence (PDF, PNG or JPEG, at most 5 MB)
+         * @description Type is read from the file content. Requests above the size limit are refused before authentication.
+         */
         post: operations["uploadVerificationDocument"];
         delete?: never;
         options?: never;
@@ -253,7 +256,10 @@ export interface paths {
         /** List portal users */
         get: operations["listPortalUsers"];
         put?: never;
-        /** Invite a person by email */
+        /**
+         * Invite a person by email
+         * @description Inviting again an email that has not accepted yet renews the invitation (new expiry, new roles).
+         */
         post: operations["invitePortalUser"];
         delete?: never;
         options?: never;
@@ -277,7 +283,12 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Change roles, agent link or status */
+        /**
+         * Change roles, agent link or status
+         * @description Nobody may change their own roles or disable themselves; another administrator must.
+         *     While the organisation is suspended only `{"status": "DISABLED"}` is accepted.
+         *
+         */
         patch: operations["updatePortalUser"];
         trace?: never;
     };
@@ -333,7 +344,10 @@ export interface paths {
         /** List API credentials (secrets never returned) */
         get: operations["listApiClients"];
         put?: never;
-        /** Create API credentials; secret shown once */
+        /**
+         * Create API credentials; secret shown once
+         * @description Scope catalogue:write needs a role that may propose purpose codes.
+         */
         post: operations["createApiClient"];
         delete?: never;
         options?: never;
@@ -454,6 +468,30 @@ export interface paths {
         get: operations["monitorIntents"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant_id}/intents/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: components["parameters"]["TenantId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Same as listing, plus search by customer number
+         * @description POST so the customer's number travels in the body, never in a URL, browser history or access log.
+         *     The number is matched by keyed hash.
+         *
+         */
+        post: operations["searchIntents"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1094,6 +1132,15 @@ export interface components {
         };
     };
     responses: {
+        /** @description Request body above the limit for this path. */
+        PayloadTooLarge: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
         /** @description Missing or invalid credentials. */
         Unauthorized: {
             headers: {
@@ -1547,6 +1594,8 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     deleteVerificationDocument: {
@@ -2011,8 +2060,6 @@ export interface operations {
                 status?: components["schemas"]["IntentStatus"][];
                 purpose_code?: string;
                 agent_id?: string;
-                /** @description Exact recipient number; matched by keyed hash, never stored in logs. */
-                phone?: components["schemas"]["E164"];
                 created_from?: string;
                 created_to?: string;
                 cursor?: components["parameters"]["Cursor"];
@@ -2025,6 +2072,49 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Intents. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["MonitorIntent"][];
+                        next_cursor: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    searchIntents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: components["parameters"]["TenantId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    status?: components["schemas"]["IntentStatus"][];
+                    purpose_code?: string;
+                    agent_id?: string;
+                    phone?: components["schemas"]["E164"];
+                    /** Format: date-time */
+                    created_from?: string;
+                    /** Format: date-time */
+                    created_to?: string;
+                    cursor?: string;
+                    /** @default 50 */
+                    limit?: number;
+                };
+            };
+        };
         responses: {
             /** @description Intents. */
             200: {
@@ -2369,13 +2459,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description File. */
+            /** @description File, as uploaded. Download is recorded in the organisation's audit log. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/octet-stream": string;
+                    "application/pdf": string;
+                    "image/png": string;
+                    "image/jpeg": string;
                 };
             };
             403: components["responses"]["Forbidden"];

@@ -31,6 +31,7 @@ jobs:
         options: --health-cmd pg_isready --health-interval 5s --health-retries 10
     env:
       RINGSAYS_TEST_PG_ADMIN_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres
+      RINGSAYS_ENVIRONMENT: local
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -66,6 +67,7 @@ jobs:
         ports: ["6379:6379"]
     env:
       PGPASSWORD: postgres
+      RINGSAYS_ENVIRONMENT: local
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

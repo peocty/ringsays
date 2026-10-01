@@ -11,13 +11,15 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 from sqlalchemy import select, text
 
+from app.core.config import settings
 from app.core.db import anonymous_tx, tenant_tx
 from app.core.tables import tenants
+from app.modules.audit import service as audit
 from app.modules.intent.domain import Channel, IntentStatus, Priority
 from app.platform import blobs
 
 from . import integration, monitor, org
-from .access import BadRequest, IdentityDep, Member, Perm, load_staff, need, permissions_for
+from .access import BadRequest, Forbidden, IdentityDep, Member, Perm, load_staff, need, permissions_for
 
 router = APIRouter(prefix="/admin/v1", tags=["Admin"])
 
@@ -145,6 +147,10 @@ ProposeCodes = Annotated[Member, Depends(need(Perm.CATALOGUE_PROPOSE, write=True
 ReadIntegration = Annotated[Member, Depends(need(Perm.INTEGRATION_READ))]
 ManageIntegration = Annotated[Member, Depends(need(Perm.INTEGRATION_MANAGE, write=True))]
 ReadIntents = Annotated[Member, Depends(need(Perm.INTENTS_READ_ALL, Perm.INTENTS_READ_OWN))]
+# Containment actions stay available while an organisation is suspended (revoke, disable, stop using).
+ContainOrg = Annotated[Member, Depends(need(Perm.ORG_MANAGE))]
+ContainIntegration = Annotated[Member, Depends(need(Perm.INTEGRATION_MANAGE))]
+UsersAny = Annotated[Member, Depends(need(Perm.USERS_MANAGE))]
 ReadAudit = Annotated[Member, Depends(need(Perm.AUDIT_READ))]
 Limit = Annotated[int, Query(ge=1, le=200)]
 
@@ -154,21 +160,36 @@ Limit = Annotated[int, Query(ge=1, le=200)]
 
 @router.get("/me", tags=["Session"])
 def me(identity: IdentityDep, now: Now) -> dict[str, Any]:
-    with anonymous_tx() as conn:
-        rows = conn.execute(
-            text("SELECT * FROM enterprise.portal_sign_in(:i, :s, :e, :v, :n)"),
-            {
-                "i": identity.issuer,
-                "s": identity.subject,
-                "e": identity.email,
-                "v": identity.email_verified,
-                "n": now,
-            },
-        ).all()
+    rows: list[Any] = []
+    # Only identities from the tenant identity provider may accept tenant invitations.
+    if identity.issuer == settings.admin_oidc_issuer:
+        with anonymous_tx() as conn:
+            rows = list(
+                conn.execute(
+                    text("SELECT * FROM enterprise.portal_sign_in(:i, :s, :e, :v, :n)"),
+                    {
+                        "i": identity.issuer,
+                        "s": identity.subject,
+                        "e": identity.email,
+                        "v": identity.email_verified,
+                        "n": now,
+                    },
+                ).all()
+            )
     memberships = []
     for r in rows:
         with tenant_tx(r.tenant_id) as conn:
             t = conn.execute(select(tenants).where(tenants.c.id == r.tenant_id)).one()
+            if r.newly_bound:
+                audit.append(
+                    conn,
+                    tenant_id=r.tenant_id,
+                    actor=f"portal:{r.user_id}",
+                    action="portal_user.accept_invitation",
+                    object_type="portal_user",
+                    object_id=str(r.user_id),
+                    at=now,
+                )
         memberships.append(
             {
                 "tenant_id": str(r.tenant_id),
@@ -261,7 +282,7 @@ def add_number(body: NumberIn, m: ManageOrg, now: Now) -> dict[str, Any]:
 
 
 @router.post("/tenants/{tenant_id}/calling-numbers/{number_id}/revoke", tags=["Organisation"])
-def revoke_number(number_id: UUID, body: ReasonIn, m: ManageOrg, now: Now) -> dict[str, Any]:
+def revoke_number(number_id: UUID, body: ReasonIn, m: ContainOrg, now: Now) -> dict[str, Any]:
     with tenant_tx(m.tenant_id) as conn:
         return org.revoke_number(conn, m, number_id, body.reason, now)
 
@@ -284,8 +305,15 @@ async def upload_document(
     reference: Annotated[str | None, Form(max_length=80)] = None,
 ) -> dict[str, Any]:
     data = await file.read(org.MAX_DOCUMENT_BYTES + 1)
-    with tenant_tx(m.tenant_id) as conn:
-        return org.upload_document(conn, m, kind, reference, file.filename, data, now)
+    content_type = org.validate_document(data)
+    store = blobs.get_store()
+    key = store.put(data)
+    try:
+        with tenant_tx(m.tenant_id) as conn:
+            return org.record_document(conn, m, kind, reference, file.filename, data, content_type, key, now)
+    except BaseException:
+        store.delete(key)  # nothing committed refers to it
+        raise
 
 
 @router.delete(
@@ -320,8 +348,10 @@ def invite_user(body: InviteIn, m: ManageUsers, now: Now) -> dict[str, Any]:
 
 
 @router.patch("/tenants/{tenant_id}/users/{user_id}", tags=["Users"])
-def update_user(user_id: UUID, body: UserUpdateIn, m: ManageUsers, now: Now) -> dict[str, Any]:
+def update_user(user_id: UUID, body: UserUpdateIn, m: UsersAny, now: Now) -> dict[str, Any]:
     fields = _set_fields(body)
+    if m.tenant_status == "SUSPENDED" and fields != {"status": "DISABLED"}:
+        raise Forbidden("Organisation is suspended; only disabling people is allowed")
     for required in ("roles", "status"):
         if required in fields and fields[required] is None:
             raise BadRequest(f"{required} cannot be empty")
@@ -365,13 +395,15 @@ def list_clients(m: ReadIntegration) -> dict[str, Any]:
 
 @router.post("/tenants/{tenant_id}/api-clients", status_code=201, tags=["Integration"])
 def create_client(body: ApiClientIn, m: ManageIntegration, now: Now) -> JSONResponse:
+    if "catalogue:write" in body.scopes and Perm.CATALOGUE_PROPOSE not in m.permissions:
+        raise Forbidden("catalogue:write needs a role that may propose purpose codes")
     with tenant_tx(m.tenant_id) as conn:
         out = integration.create_client(conn, m, body.label, list(body.scopes), now)
     return JSONResponse(out, status_code=201, headers={"Cache-Control": "no-store"})
 
 
 @router.post("/tenants/{tenant_id}/api-clients/{client_id}/revoke", tags=["Integration"])
-def revoke_client(client_id: str, body: ReasonIn, m: ManageIntegration, now: Now) -> dict[str, Any]:
+def revoke_client(client_id: str, body: ReasonIn, m: ContainIntegration, now: Now) -> dict[str, Any]:
     with tenant_tx(m.tenant_id) as conn:
         return integration.revoke_client(conn, m, client_id, body.reason, now)
 
@@ -390,7 +422,7 @@ def create_endpoint(body: WebhookIn, m: ManageIntegration, now: Now) -> JSONResp
 
 
 @router.post("/tenants/{tenant_id}/webhook-endpoints/{endpoint_id}/disable", tags=["Integration"])
-def disable_endpoint(endpoint_id: UUID, body: ReasonIn, m: ManageIntegration, now: Now) -> dict[str, Any]:
+def disable_endpoint(endpoint_id: UUID, body: ReasonIn, m: ContainIntegration, now: Now) -> dict[str, Any]:
     with tenant_tx(m.tenant_id) as conn:
         return integration.disable_endpoint(conn, m, endpoint_id, body.reason, now)
 
@@ -420,36 +452,68 @@ def replay_delivery(
 # Monitor
 
 
+def _statuses(raw: list[str] | None) -> list[str] | None:
+    if not raw:
+        return None
+    try:
+        return [IntentStatus(x).value for x in raw if x]
+    except ValueError as exc:
+        raise BadRequest("status contains an unknown value") from exc
+
+
 @router.get("/tenants/{tenant_id}/intents", tags=["Monitor"])
 def list_intents(
     m: ReadIntents,
     status: Annotated[str | None, Query()] = None,
     purpose_code: str | None = None,
     agent_id: str | None = None,
-    phone: Annotated[str | None, Query(pattern=r"^\+[1-9]\d{6,14}$")] = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
     cursor: str | None = None,
     limit: Limit = 50,
 ) -> dict[str, Any]:
-    statuses = None
-    if status:
-        try:
-            statuses = [IntentStatus(s).value for s in status.split(",") if s]
-        except ValueError as exc:
-            raise BadRequest("status contains an unknown value") from exc
     with tenant_tx(m.tenant_id) as conn:
         return monitor.list_intents(
             conn,
             m,
-            statuses=statuses,
+            statuses=_statuses(status.split(",") if status else None),
             purpose_code=purpose_code,
             agent_id=agent_id,
-            phone=phone,
+            phone=None,
             created_from=created_from,
             created_to=created_to,
             limit=limit,
             cursor=cursor,
+        )
+
+
+class IntentSearchIn(_Strict):
+    """Same filters as GET /intents plus phone. POST so the number never sits in a URL or access log."""
+
+    status: Annotated[list[str], Field(max_length=12)] | None = None
+    purpose_code: Annotated[str, StringConstraints(max_length=64)] | None = None
+    agent_id: Annotated[str, StringConstraints(max_length=64)] | None = None
+    phone: E164 | None = None
+    created_from: datetime | None = None
+    created_to: datetime | None = None
+    cursor: Annotated[str, StringConstraints(max_length=200)] | None = None
+    limit: Annotated[int, Field(ge=1, le=200)] = 50
+
+
+@router.post("/tenants/{tenant_id}/intents/search", tags=["Monitor"])
+def search_intents(body: IntentSearchIn, m: ReadIntents) -> dict[str, Any]:
+    with tenant_tx(m.tenant_id) as conn:
+        return monitor.list_intents(
+            conn,
+            m,
+            statuses=_statuses(body.status),
+            purpose_code=body.purpose_code,
+            agent_id=body.agent_id,
+            phone=body.phone,
+            created_from=body.created_from,
+            created_to=body.created_to,
+            limit=body.limit,
+            cursor=body.cursor,
         )
 
 

@@ -92,6 +92,7 @@ def verify(token: str) -> Identity:
         issuer=issuer,
         subject=str(claims["sub"]),
         email=email.lower() if isinstance(email, str) else None,
-        email_verified=claims.get("email_verified") is True,
+        email_verified=claims.get("email_verified") is True
+        or (issuer in settings.oidc_email_trusted_issuers and "email_verified" not in claims),
         name=claims.get("name") if isinstance(claims.get("name"), str) else None,
     )

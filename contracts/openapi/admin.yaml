@@ -12,6 +12,9 @@ info:
     Tenant roles: TENANT_ADMIN, INTEGRATION_ADMIN, SUPERVISOR, AGENT, COMPLIANCE.
     RingSays staff roles: RS_REVIEWER (decides reviews), RS_ADMIN (creates and suspends tenants).
 
+    Containment stays available while an organisation is suspended: revoking credentials, disabling
+    webhook endpoints, stopping a calling number and disabling people.
+
     Back office paths (`/backoffice/...`, `/review/...`) are served only by the internal back office
     deployment, which holds the back office database role. The tenant facing deployment answers 404.
 
@@ -302,6 +305,7 @@ paths:
       tags: [Verification]
       operationId: uploadVerificationDocument
       summary: Upload evidence (PDF, PNG or JPEG, at most 5 MB)
+      description: Type is read from the file content. Requests above the size limit are refused before authentication.
       requestBody:
         required: true
         content:
@@ -322,6 +326,8 @@ paths:
         "400": { $ref: "./common.yaml#/components/responses/BadRequest" }
         "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
         "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "./common.yaml#/components/responses/UnprocessableEntity" }
 
   /tenants/{tenant_id}/verification/documents/{document_id}:
     parameters:
@@ -380,6 +386,7 @@ paths:
       tags: [Users]
       operationId: invitePortalUser
       summary: Invite a person by email
+      description: Inviting again an email that has not accepted yet renews the invitation (new expiry, new roles).
       requestBody:
         required: true
         content:
@@ -407,6 +414,9 @@ paths:
       tags: [Users]
       operationId: updatePortalUser
       summary: Change roles, agent link or status
+      description: |
+        Nobody may change their own roles or disable themselves; another administrator must.
+        While the organisation is suspended only `{"status": "DISABLED"}` is accepted.
       requestBody:
         required: true
         content:
@@ -513,6 +523,7 @@ paths:
       tags: [Integration]
       operationId: createApiClient
       summary: Create API credentials; secret shown once
+      description: Scope catalogue:write needs a role that may propose purpose codes.
       requestBody:
         required: true
         content:
@@ -724,10 +735,6 @@ paths:
         - name: agent_id
           in: query
           schema: { type: string }
-        - name: phone
-          in: query
-          description: Exact recipient number; matched by keyed hash, never stored in logs.
-          schema: { $ref: "./common.yaml#/components/schemas/E164" }
         - name: created_from
           in: query
           schema: { type: string, format: date-time }
@@ -736,6 +743,51 @@ paths:
           schema: { type: string, format: date-time }
         - $ref: "./common.yaml#/components/parameters/Cursor"
         - $ref: "./common.yaml#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Intents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/MonitorIntent" }
+                  next_cursor: { type: [string, "null"] }
+        "400": { $ref: "./common.yaml#/components/responses/BadRequest" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+
+  /tenants/{tenant_id}/intents/search:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    post:
+      tags: [Monitor]
+      operationId: searchIntents
+      summary: Same as listing, plus search by customer number
+      description: |
+        POST so the customer's number travels in the body, never in a URL, browser history or access log.
+        The number is matched by keyed hash.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                status:
+                  type: array
+                  maxItems: 12
+                  items: { $ref: "./common.yaml#/components/schemas/IntentStatus" }
+                purpose_code: { type: string, maxLength: 64 }
+                agent_id: { type: string, maxLength: 64 }
+                phone: { $ref: "./common.yaml#/components/schemas/E164" }
+                created_from: { type: string, format: date-time }
+                created_to: { type: string, format: date-time }
+                cursor: { type: string, maxLength: 200 }
+                limit: { type: integer, minimum: 1, maximum: 200, default: 50 }
       responses:
         "200":
           description: Intents.
@@ -1005,10 +1057,14 @@ paths:
       summary: Download evidence file
       responses:
         "200":
-          description: File.
+          description: File, as uploaded. Download is recorded in the organisation's audit log.
           content:
-            application/octet-stream:
-              schema: { type: string, contentMediaType: application/octet-stream }
+            application/pdf:
+              schema: { type: string, contentMediaType: application/pdf }
+            image/png:
+              schema: { type: string, contentMediaType: image/png }
+            image/jpeg:
+              schema: { type: string, contentMediaType: image/jpeg }
         "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
         "404": { $ref: "./common.yaml#/components/responses/NotFound" }
 
@@ -1058,6 +1114,13 @@ paths:
         "409": { $ref: "./common.yaml#/components/responses/Conflict" }
 
 components:
+  responses:
+    PayloadTooLarge:
+      description: Request body above the limit for this path.
+      content:
+        application/problem+json:
+          schema: { $ref: "./common.yaml#/components/schemas/Problem" }
+
   securitySchemes:
     oidc:
       type: openIdConnect

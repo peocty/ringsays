@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DataError, DBAPIError
 
 from app.modules.intent.errors import IntentError
 
@@ -60,8 +61,22 @@ def install(app: FastAPI) -> None:
         ]
         return problem(400, "validation_failed", "Request failed validation", {"errors": errors})
 
+    @app.exception_handler(DBAPIError)
+    async def _database(_: Request, exc: DBAPIError) -> JSONResponse:
+        sqlstate = getattr(exc.orig, "sqlstate", None)
+        if sqlstate == "RSG01":
+            # A database guard refused a change (for example evidence locked by a concurrent submit).
+            log.warning("database guard refused a change")
+            return problem(409, "state_changed", "This changed while you were working; reload and try again")
+        if isinstance(exc, DataError) or (sqlstate and sqlstate.startswith("22")):
+            return problem(400, "validation_failed", "A value is not valid")
+        log.error("database error: %s %s", type(exc).__name__, sqlstate)
+        return problem(500, "internal_error", "Unexpected error; it has been logged")
+
     @app.exception_handler(Exception)
     async def _unexpected(_: Request, exc: Exception) -> JSONResponse:
+        if isinstance(exc, ValueError) and "NUL" in str(exc):
+            return problem(400, "validation_failed", "Request contains a NUL character")
         # Log type only: messages from drivers can contain request data.
         log.error("unhandled error: %s", type(exc).__name__)
         return problem(500, "internal_error", "Unexpected error; it has been logged")
