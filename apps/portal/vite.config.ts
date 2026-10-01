@@ -26,7 +26,8 @@ export default defineConfig({
     strictPort: true,
     headers: { "Content-Security-Policy": csp, "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" },
   },
-  build: { sourcemap: true, target: "es2022" },
+  // No inlined data: assets, so the strict font-src and img-src policy holds.
+  build: { sourcemap: "hidden", target: "es2022", assetsInlineLimit: 0 },
   test: {
     environment: "jsdom",
     globals: true,
