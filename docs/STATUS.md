@@ -131,15 +131,87 @@ Test count: 650 backend tests, 15 TypeScript tests.
 
 Also: timezone validation now accepts only IANA region zones.
 
+## Stage 5 (2026-10-01)
+
+| Area | Item | Status |
+| --- | --- | --- |
+| Contracts | Admin API (organisation, verification, people, catalogue, integration, monitor, audit, back office) | Done, tested here (Redocly: 0 errors, 0 warnings; live responses validated) |
+| Sign in | OpenID Connect with PKCE, refresh token renewal; roles stored by RingSays and checked per request (ADR 0010) | Done, tested here with MOCK identity provider |
+| Organisation | Profile, departments, agents, calling numbers (masked), people and roles with invitations | Done, tested here |
+| Verification | Evidence upload (type read from content, 5 MB), submit, RingSays review, approve or reject with reason | Done, tested here; files on local disk (MOCK object storage) |
+| Catalogue | Propose, review and retire purpose codes | Done, tested here |
+| Integration | API credentials and webhook endpoints (secrets shown once), delivery log, replay | Done, tested here |
+| Monitor | Live intent monitor with masked numbers, private number search, detail with history and attempts | Done, tested here |
+| Audit | Tenant audit log, chain check, CSV export that can be verified outside RingSays | Done, tested here |
+| Back office | Separate database role; onboarding, suspension with containment, review queue | Done, tested here |
+| Database | Guard triggers so the API role can never approve its own items (allow list, SQLSTATE RSG01) | Done, tested here |
+| Delivery | Receiver rules use the tenant's sector (bank, insurance, finance, government) | Done, tested here |
+| Portal | React 19, Arabic first with right to left, English; phone and desktop layouts | Done, tested here in headless Chromium |
+| Portal | Strict Content Security Policy, runtime configuration, unprivileged nginx image (ADR 0011) | Policy tested here in browser; nginx image not built here (no Docker daemon) |
+| Settings | Fail closed: default environment is production; MOCK sign in only in local | Done, tested here |
+
+Test count: 721 backend tests, 15 domain tests, 27 portal unit tests, 12 browser tests (desktop and phone,
+including accessibility scans in Arabic and English with no serious violations).
+
+### Independent review (stage 5, backend)
+
+| # | Defect | Fix |
+| --- | --- | --- |
+| 1 | Profile could change after RingSays verified it (race with approval) | Tenant row locked and status rechecked; database guard on profile columns |
+| 2 | Evidence could be removed while a submission was being decided | Same lock for upload and delete; database guard; approval checks all submitted evidence still exists |
+| 3 | Guard trigger skipped any role not named exactly ringsays_app | Allow list (owner, back office); every other role guarded |
+| 4 | Unlimited upload read to disk before authentication | Body size capped in outer middleware (Content-Length and streamed count) |
+| 5 | Customer number in URL query, so in access logs | Number search moved to POST body |
+| 6 | Staff identity provider could consume a tenant invitation | Invitations bind only for tenant identity provider |
+| 7 | Failed upload left the file behind | File removed on any failure before commit |
+| 8 | Administrator could grant themselves integration rights | No one changes their own roles; catalogue:write needs propose permission |
+| 9 | Suspension blocked revoking leaked credentials | Containment actions allowed while suspended |
+| 10 | Expired invitations were a dead end; concurrent invites gave 500 | Re-invite renews; unique conflicts return 409 |
+| 11 | Invitation acceptance and staff evidence downloads not audited; two contract mismatches | Both audited in tenant chain; contract corrected |
+
+Also fixed from lower-confidence notes: settings fail closed (production by default), local file storage refused in
+production, trusted email issuers for providers without `email_verified`, CSV export uses the hashed time format and
+names escaped cells, NUL characters return 400, migration downgrade revokes grants.
+
+### Independent review (stage 5, portal)
+
+| # | Defect | Fix |
+| --- | --- | --- |
+| 1 | Production CSP used a URL with path, which blocks discovery and token calls | Origins derived at container start; same logic in browser tests |
+| 2 | nginx dropped security headers in every location | Shared header include in every location |
+| 3 | Token expiry sent people to sign in and lost their work | Background renewal with refresh token; expired session shows a prompt, page stays |
+| 4 | Possible endless redirect when the API rejects a valid session | No automatic redirect at all |
+| 5 | Live refresh plus Load more could skip rows | Infinite query refetches all pages with fresh cursors |
+| 6 | Late Load more results could land under a new filter | Pages keyed by filter |
+| 7 | Secrets kept in mutation cache; focus lost after dialogs | Cache reset on acknowledgement; focus returned to opener |
+| 8 | Arabic Revoke and Cancel had the same label | Revoke is now إبطال |
+| 9 | Suspended organisations saw actions that always fail | Only containment actions shown |
+| 10 | Profile looked editable while under review | Locked while a request is open |
+| 11 | Closed phone menu still in tab order | Hidden when closed; Escape and backdrop close it |
+| 12 | Wrong toast after a review decision | "Decision recorded" |
+| 13 | Arabic wording and bidi issues | Client ID, Requested, urgent hint isolates, count phrasing, arrow direction |
+
+Also fixed: sign out sends id_token_hint, source maps not shipped, .dockerignore, runtime configuration, uploads
+and downloads report expired sessions, Arabic file names (filename*), date filters in Riyadh time, stale dialog
+errors, menus follow role changes, accessible tabs, focus moves to page content on navigation.
+
 ## Known gaps
 
 - Foundation doc section H transition table predates ADR 0004 refinements.
 - Several list endpoints lack a 4XX response in contracts (lint warnings).
-- Webhook endpoint registration and replay have service functions but no HTTP route yet; admin API arrives with the portal (stage 5).
 - SMS provider and push providers (APNs, FCM) are MOCK; real KSA SMS provider and Apple/Google credentials needed.
 - Consumer to consumer intents and Request to Talk are MVP 2.
-- Tenant sector is fixed to BANK for receiver rules until admin API sets it per tenant.
 - A Context Token replayed through idempotency comes back null (shown once); a re-issue endpoint is needed.
 - Audit chain heads must be exported to write once storage by an operations job; export target not built.
 - Client status cache is per process (30 s); move to Redis when more than one API instance runs.
 - Python 3.11 used in build workspace; Dockerfile and CI use 3.12. Code targets 3.11 or later.
+- Verification evidence is on local disk (MOCK object storage); production needs an S3 compatible store in region
+  with encryption (settings refuse local storage in production).
+- Calling number checks against the operator caller name registry are manual (reviewer); no operator API yet.
+- Domain ownership proof (DNS record) is a document upload, not an automatic check.
+- Commercial registration and domain are not checked for duplicates across organisations; reviewer must check.
+- No four eyes rule yet: one reviewer can approve alone.
+- Portal Arabic needs native speaker review; server validation messages are English only.
+- nginx image and Docker Compose portal service not built or run here (no Docker daemon).
+- Staff sign in binding (first sign in of a seeded staff email) is logged, not in a tenant audit chain.
+- Toast messages inside an open dialog may not be announced by screen readers.

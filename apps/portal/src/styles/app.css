@@ -908,3 +908,26 @@ input[type="file"] {
   border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }
+
+/* Grid children may shrink, so wide tables scroll inside their card instead of overflowing it */
+.card > *,
+.dialog-body > * {
+  min-width: 0;
+}
+.table-wrap {
+  max-width: 100%;
+}
+
+/* Left to right values (numbers, codes, emails) keep the column's alignment in Arabic */
+[dir="rtl"] td[dir="ltr"],
+[dir="rtl"] dd[dir="ltr"] {
+  text-align: right;
+}
+.decide {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.row .decide {
+  flex-direction: row;
+}

@@ -38,14 +38,14 @@ function useStaffRoles() {
 function DecisionButtons({ onDecide, disabled }: { onDecide: (d: Decision) => void; disabled?: boolean }) {
   const { t } = useTranslation();
   return (
-    <>
+    <div className="decide">
       <Button variant="primary" disabled={disabled} onClick={() => onDecide("APPROVE")}>
         {t("backoffice.approve")}
       </Button>
       <Button variant="danger" disabled={disabled} onClick={() => onDecide("REJECT")}>
         {t("backoffice.reject")}
       </Button>
-    </>
+    </div>
   );
 }
 
@@ -111,6 +111,7 @@ export function ReviewQueuePage() {
           q.verifications.length === 0 ? (
             <Empty>{t("backoffice.nothingWaiting")}</Empty>
           ) : (
+            <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
@@ -135,6 +136,7 @@ export function ReviewQueuePage() {
                 ))}
               </tbody>
             </table>
+            </div>
           )
         ) : null}
         {q && tab === "codes" ? (

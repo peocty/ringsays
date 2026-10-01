@@ -10,7 +10,8 @@ Built by PEOCIT Technologies. Launch market: Saudi BFSI, enterprise first. Scale
 contracts/          source of truth: OpenAPI, AsyncAPI, state machine, purpose code seed
 backend/            Python 3.11+ FastAPI modular monolith
 packages/domain/    shared TypeScript domain types (mobile, SDK, portal)
-apps/               mobile (React Native) and portal (React), from stage 5
+apps/portal/        enterprise portal and RingSays back office (React, Arabic and English)
+apps/mobile/        RingSays app (React Native), from stage 6
 sdk/                enterprise SDK, from stage 6
 infra/              Docker Compose for local; Helm and Terraform from stage 8
 docs/adr/           architecture decision records
@@ -51,6 +52,24 @@ curl -X POST localhost:8000/v1/intents -H "Authorization: Bearer <token>" \
 ```
 
 API health: http://localhost:8000/health
+
+### Portal
+
+```bash
+make api       # API on :8000 (local environment, MOCK sign in at /dev/oidc)
+make seed      # demo bank with portal people and RingSays staff (all MOCK)
+make portal    # http://localhost:5173
+```
+
+Sign in on the MOCK page as, for example, `admin@mockbank.example` (organisation administrator),
+`integration@mockbank.example`, `supervisor@mockbank.example`, `agent@mockbank.example`,
+`compliance@mockbank.example`, or RingSays staff `reviewer@ringsays.example` and `ops@ringsays.example`.
+Any other email can be typed, for example one you just invited.
+
+Browser tests: `make e2e` (needs the API running; seeds its own isolated data each run).
+
+Settings fail closed: without `RINGSAYS_ENVIRONMENT=local` (set in `backend/.env` by `make setup`) the API
+refuses to start with local secrets and MOCK sign in is off.
 
 Background jobs (delivery, expiry, outbox relay, webhooks): `cd backend && .venv/bin/python -m app.worker`.
 In local environment the worker uses MOCK push, directory, broker and webhook sender and says so in its log.
