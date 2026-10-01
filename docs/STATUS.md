@@ -195,6 +195,44 @@ Also fixed: sign out sends id_token_hint, source maps not shipped, .dockerignore
 and downloads report expired sessions, Arabic file names (filename*), date filters in Riyadh time, stale dialog
 errors, menus follow role changes, accessible tabs, focus moves to page content on navigation.
 
+## Stage 6 (2026-10-01)
+
+| Area | Item | Status |
+| --- | --- | --- |
+| Client package | Typed client from client contract; P-256 device key, signed refresh, single flight renewal, sign out epoch | Done, tested here (signatures verified with OpenSSL; live tests against local API) |
+| API | `POST /auth/logout`: device, refresh tokens and push tokens revoked | Done, tested here |
+| API | Fix: refreshed access tokens hid intents received before the refresh (visibility started at refresh time) | Done, tested here (regression test) |
+| App | Sign in with SMS code (KSA, India, UAE numbers), Arabic first with right to left, English | Done, tested here (web build in phone sized Chromium) |
+| App | Inbox (requests, scheduled, history), intent screen with trust badge, reason, time left; talk now, later, suggest times, message, decline with reason | Done, tested here |
+| App | Settings: verified only, quiet hours, organisations with consent withdrawal, data export as file, sign out, delete account | Done, tested here; file share sheet needs device testing |
+| App | Push (APNs, FCM), notification opens intent, token kept current | Written, needs device testing; MOCK push provider |
+| App | Secure storage (Keychain, Keystore), release build requires https | Written, needs device testing |
+| SDK | `RingSaysProvider`, `IntentCard`, `useIntent` over Context Tokens; install binding; en/ar | Done, tested here (fake API and live Context Token test) |
+| CI | Mobile, client and SDK in workspace typecheck and tests; e2e job runs portal and app web build | Written; runs when repository is pushed |
+
+Test count: 725 backend tests, 15 domain, 20 client, 10 app unit, 13 SDK, 27 portal unit; browser tests: 12 portal,
+6 app.
+
+### Independent review (stage 6)
+
+| # | Defect | Fix |
+| --- | --- | --- |
+| 1 | Sign out only on the phone; pushes for the old account kept reaching a shared phone | `POST /auth/logout` revokes device, refresh and push tokens; app calls it, always clears the phone |
+| 2 | Refresh in flight during sign out wrote the session back | Session epoch; stale refresh results dropped |
+| 3 | Android push: channel created after permission prompt; no Firebase file | Channel first; `GOOGLE_SERVICES_JSON` build setting |
+| 4 | Push token never updated after sign in | Sent on start, foreground and token rotation |
+| 5 | One secure storage read error broke the app until restart | Failed start not cached; unreadable key replaced |
+| 6 | Quick quiet hours taps raced with the same version (412) | Buttons disabled while saving |
+| 7 | Queries ignored app background and foreground on phones | Focus tied to app state |
+| 8 | SDK could show an old token's intent after the token changed | Only the latest request updates the card |
+| 9 | Cached organisation texts kept the old language | Reload on language switch |
+| 10 | Old notification reopened at next sign in | Handled once, then cleared |
+| 11 | Release build could fall back to plain http loopback | https required in release builds |
+| 12 | Answer errors hidden behind the open sheet | Errors inside each sheet; ended intents refresh |
+| 13 | Data export showed only a count | Saved as a JSON file through share sheet (download on web) |
+| 14 | One device key across accounts on a phone | New key after every sign out |
+| 15 | Native right to left mixed with app language | Native RTL off; direction from app language |
+
 ## Known gaps
 
 - Foundation doc section H transition table predates ADR 0004 refinements.
@@ -215,3 +253,10 @@ errors, menus follow role changes, accessible tabs, focus moves to page content 
 - nginx image and Docker Compose portal service not built or run here (no Docker daemon).
 - Staff sign in binding (first sign in of a seeded staff email) is logged, not in a tenant audit chain.
 - Toast messages inside an open dialog may not be announced by screen readers.
+- App and SDK not run on real iPhone or Android phones here; push providers are MOCK; app store builds (EAS) not made.
+- Device key is software (exportable inside secure storage); Secure Enclave / StrongBox key planned.
+- Enterprise API cannot offer time slots yet, so the SCHEDULE answer is untested end to end.
+- App delivery needs push permission; without it intents go by ordinary call (PSTN).
+- Incoming call screen integration (CallKit, ConnectionService) and caller name overlay not built.
+- Native header back arrow does not mirror in Arabic (native RTL off by design); app Arabic needs native review.
+- SDK card declines with reason "not now"; other reasons only through `useIntent`.

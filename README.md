@@ -11,8 +11,9 @@ contracts/          source of truth: OpenAPI, AsyncAPI, state machine, purpose c
 backend/            Python 3.11+ FastAPI modular monolith
 packages/domain/    shared TypeScript domain types (mobile, SDK, portal)
 apps/portal/        enterprise portal and RingSays back office (React, Arabic and English)
-apps/mobile/        RingSays app (React Native), from stage 6
-sdk/                enterprise SDK, from stage 6
+packages/client/    typed API client, device key and session (app and SDK)
+apps/mobile/        RingSays app (Expo, React Native), Arabic and English
+sdk/react-native/   enterprise SDK: show and answer intents inside a bank's own app
 infra/              Docker Compose for local; Helm and Terraform from stage 8
 docs/adr/           architecture decision records
 docs/STATUS.md      what is done, mocked, or needs device testing
@@ -73,6 +74,26 @@ refuses to start with local secrets and MOCK sign in is off.
 
 Background jobs (delivery, expiry, outbox relay, webhooks): `cd backend && .venv/bin/python -m app.worker`.
 In local environment the worker uses MOCK push, directory, broker and webhook sender and says so in its log.
+
+### RingSays app
+
+```bash
+make api       # with RINGSAYS_OTP_PER_IP_PER_HOUR=100000 for repeated test sign ins
+make mobile    # Expo dev server: scan with Expo Go or run a development build
+```
+
+Sign in with any KSA number (`5XXXXXXXX`); in local environment the code is shown by
+`curl "localhost:8000/dev/sms/last-code?phone=%2B9665XXXXXXXX"`. Send an intent from the portal or API
+with `channel_preference: ["PRECALL_PUSH","PSTN"]`, then run the worker once
+(`cd backend && .venv/bin/python -m app.worker --once`).
+
+Browser tests of the web build: `make e2e-mobile`. Release builds need `EXPO_PUBLIC_RINGSAYS_API_BASE`
+(https) and, for Android push, `GOOGLE_SERVICES_JSON`.
+
+### Enterprise SDK
+
+See `sdk/react-native/README.md`. Create the intent with `channel_preference` containing `SDK`, pass the
+returned `context_token` to the bank app, render `<IntentCard token=… />`.
 
 ## Rules for contributors
 
