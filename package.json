@@ -18,5 +18,11 @@
     "@types/node": "^22.20.4",
     "turbo": "2.5.4",
     "typescript": "5.8.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "@redocly/cli>react": "19.2.3",
+      "@redocly/cli>react-dom": "19.2.3"
+    }
   }
 }

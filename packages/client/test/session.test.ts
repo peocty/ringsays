@@ -138,4 +138,51 @@ describe("session", () => {
     expect(saved.etag).toBe('W/"v2"');
     expect(calls.length).toBe(3);
   });
+
+  it("sign out revokes on the server, then clears the phone even when offline", async () => {
+    const { session, calls } = setup((url) => {
+      if (url.endsWith("/auth/verify")) return json(200, tokens(1));
+      if (url.endsWith("/auth/logout")) return new Response(null, { status: 204 });
+      return json(200, inboxBody);
+    });
+    await session.verifyCode("0190a000-0000-7000-8000-00000000000a", "123456", { platform: "IOS", appVersion: "1" });
+    await session.signOut();
+    const out = calls.find((c) => c.url.endsWith("/auth/logout"))!;
+    expect(out.auth).toBe("Bearer at1");
+    expect(await session.isSignedIn()).toBe(false);
+
+    const offline = setup((url) => {
+      if (url.endsWith("/auth/verify")) return json(200, tokens(1));
+      throw new TypeError("offline");
+    });
+    await offline.session.verifyCode("0190a000-0000-7000-8000-00000000000a", "123456", { platform: "IOS", appVersion: "1" });
+    await offline.session.signOut();
+    expect(await offline.session.isSignedIn()).toBe(false);
+  });
+
+  it("a refresh in flight during sign out does not bring the session back", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const { session, advance, signedOut } = setup(async (url) => {
+      if (url.endsWith("/auth/verify")) return json(200, tokens(1));
+      if (url.endsWith("/auth/refresh")) {
+        await gate;
+        return json(200, tokens(2));
+      }
+      if (url.endsWith("/auth/logout")) return new Response(null, { status: 204 });
+      return json(200, inboxBody);
+    });
+    await session.verifyCode("0190a000-0000-7000-8000-00000000000a", "123456", { platform: "IOS", appVersion: "1" });
+    advance(850_000);
+    const pending = session.inbox().catch((e: unknown) => e);
+    await new Promise((r) => setTimeout(r, 10)); // refresh now waiting on the server
+    const out = session.signOut(); // waits on the same single flight refresh
+    // Simulate the person signing out locally first by ending while refresh is pending.
+    await (session as unknown as { endLocal(): Promise<void> }).endLocal();
+    release();
+    await out;
+    await pending;
+    expect(await session.isSignedIn()).toBe(false);
+    expect(signedOut).toEqual([]);
+  });
 });

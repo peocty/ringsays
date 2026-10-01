@@ -156,6 +156,12 @@ def refresh(body: RefreshIn, now: Now) -> JSONResponse:
     return JSONResponse(_tokens(tokens), headers={"Cache-Control": "no-store"})
 
 
+@router.post("/auth/logout", status_code=204)
+def logout(p: User, now: Now) -> Response:
+    identity.sign_out(p, now)
+    return Response(status_code=204)
+
+
 @router.put("/devices/{device_id}/push-tokens", status_code=204)
 def update_push_tokens(device_id: UUID, body: PushTokensIn, p: User) -> Response:
     if not identity.update_push_tokens(p, device_id, body.apns, body.pushkit, body.fcm):

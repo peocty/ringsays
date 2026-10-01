@@ -1,5 +1,6 @@
 import {
   ACTION_FOR,
+  RingSaysError,
   openSlots,
   suggestedSlots,
   type DisplayAction,
@@ -49,6 +50,14 @@ export default function IntentScreen() {
       void qc.invalidateQueries({ queryKey: keys.inboxAll });
       setSheet(null);
       setSent(true);
+    },
+    onError: (e) => {
+      // Ended or taken elsewhere: show its current state, actions go away.
+      if (e instanceof RingSaysError && (e.status === 410 || e.status === 409)) {
+        setSheet(null);
+        void qc.invalidateQueries({ queryKey: keys.intent(id) });
+        void qc.invalidateQueries({ queryKey: keys.inboxAll });
+      }
     },
   });
 
@@ -122,12 +131,14 @@ export default function IntentScreen() {
       </View>
 
       <Sheet visible={sheet === "later"} title={t("intent.later")} onClose={() => setSheet(null)}>
+        {respond.error ? <Banner tone="error">{errorMessage(respond.error, t)}</Banner> : null}
         {LATER_MINUTES.map((m) => (
           <Button key={m} title={t("intent.laterIn", { minutes: m })} onPress={() => send({ action: "LATER", later_minutes: m })} testID={`later-${m}`} />
         ))}
       </Sheet>
 
       <Sheet visible={sheet === "propose"} title={t("intent.proposeTitle")} onClose={() => setSheet(null)}>
+        {respond.error ? <Banner tone="error">{errorMessage(respond.error, t)}</Banner> : null}
         {suggestions.map((s) => {
           const on = picked.some((p) => p.start === s.start);
           return (
@@ -156,17 +167,20 @@ export default function IntentScreen() {
       </Sheet>
 
       <Sheet visible={sheet === "schedule"} title={t("intent.scheduleTitle")} onClose={() => setSheet(null)}>
+        {respond.error ? <Banner tone="error">{errorMessage(respond.error, t)}</Banner> : null}
         {offered.map((s) => (
           <Button key={s.start} title={formatTime(s.start, lang)} onPress={() => send({ action: "SCHEDULE", slot: { start: s.start, end: s.end } })} />
         ))}
       </Sheet>
 
       <Sheet visible={sheet === "message"} title={t("intent.message")} onClose={() => setSheet(null)}>
+        {respond.error ? <Banner tone="error">{errorMessage(respond.error, t)}</Banner> : null}
         <Body muted>{t("intent.messageNote")}</Body>
         <Button title={t("app.confirm")} variant="primary" busy={respond.isPending} onPress={() => send({ action: "MESSAGE" })} testID="message-confirm" />
       </Sheet>
 
       <Sheet visible={sheet === "decline"} title={t("intent.declineTitle")} onClose={() => setSheet(null)}>
+        {respond.error ? <Banner tone="error">{errorMessage(respond.error, t)}</Banner> : null}
         {REASONS.map((r: DeclineReason) => (
           <Button key={r} title={t(`intent.reasons.${r}`)} onPress={() => send({ action: "DECLINE", decline_reason: r })} testID={`decline-${r}`} />
         ))}

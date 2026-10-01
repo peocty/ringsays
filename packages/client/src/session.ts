@@ -59,6 +59,8 @@ export class Session {
   private state: Stored | null = null;
   private loaded = false;
   private refreshing: Promise<Stored | null> | null = null;
+  /** Bumped on every sign out; a refresh that started before it must not bring the session back. */
+  private epoch = 0;
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
 
@@ -107,8 +109,38 @@ export class Session {
     return (await this.load())?.deviceId ?? null;
   }
 
-  /** Forget this device's session (the device key stays, so signing in again is quick). */
+  /**
+   * Sign this device out: the server revokes the device, its refresh tokens and push tokens (so no
+   * more pushes for this account reach the phone), then the session is removed from the phone. The
+   * phone side always happens, even offline; the server side is best effort.
+   */
   async signOut(): Promise<void> {
+    let token: string | null = null;
+    try {
+      token = await this.accessToken();
+    } catch {
+      /* offline or refresh failed: sign out locally */
+    }
+    await this.endLocal();
+    if (!token) return;
+    const abort = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = abort ? setTimeout(() => abort.abort(), 5000) : null;
+    try {
+      await this.fetchImpl(`${this.opts.baseUrl}/v1/auth/logout`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        ...(abort ? { signal: abort.signal } : {}),
+      });
+    } catch {
+      /* best effort; the refresh token is gone from the phone either way */
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /** Remove the session from this phone only. */
+  private async endLocal(): Promise<void> {
+    this.epoch += 1;
     this.state = null;
     this.loaded = true;
     await this.opts.store.delete(KEY);
@@ -173,7 +205,7 @@ export class Session {
   /** Erase the account. The session ends on every device. */
   async eraseAccount(): Promise<void> {
     await this.callEmpty(() => this.api.DELETE("/me"));
-    await this.signOut();
+    await this.endLocal();
   }
 
   async updatePushTokens(push: PushTokens): Promise<void> {
@@ -251,6 +283,7 @@ export class Session {
   private async doRefresh(): Promise<Stored | null> {
     const s = await this.load();
     if (!s) return null;
+    const epoch = this.epoch;
     const signature = await this.opts.signer.sign(s.refreshToken);
     let res: Response;
     try {
@@ -262,13 +295,16 @@ export class Session {
     } catch {
       throw networkError(); // offline: keep the session, try again later
     }
+    if (epoch !== this.epoch) return null; // signed out meanwhile: drop the result
     if (res.status === 401 || res.status === 403) {
-      await this.signOut();
+      await this.endLocal();
       this.opts.onSignedOut?.();
       return null;
     }
     if (!res.ok) throw await problemFrom(res);
-    return this.save((await res.json()) as TokenPair);
+    const pair = (await res.json()) as TokenPair;
+    if (epoch !== this.epoch) return null;
+    return this.save(pair);
   }
 
   private async callWithResponse<T>(

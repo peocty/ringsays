@@ -26,7 +26,7 @@
       "expo-router",
       "expo-secure-store",
       ["expo-notifications", { "color": "#0f5c4d" }],
-      ["expo-localization", { "supportsRTL": true, "supportedLocales": ["ar", "en"] }]
+      ["expo-localization", { "supportsRTL": false, "supportedLocales": ["ar", "en"] }]
     ],
     "experiments": { "typedRoutes": false },
     "extra": {

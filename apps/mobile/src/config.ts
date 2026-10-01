@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import { Platform } from "react-native";
 
 /**
  * API origin. Builds set it per environment in app config (`extra.apiBase`, for example through
@@ -22,5 +23,11 @@ export const config = {
     { iso: "AE", dial: "+971", example: "5XXXXXXXX", national: /^5\d{8}$/ },
   ],
 } as const;
+
+// Release builds on phones must talk to RingSays over TLS; a missing build variable must not fall
+// back to the loopback default.
+if (!__DEV__ && Platform.OS !== "web" && !config.apiBase.startsWith("https://")) {
+  throw new Error("EXPO_PUBLIC_RINGSAYS_API_BASE must be an https URL in release builds");
+}
 
 export type Country = (typeof config.countries)[number];

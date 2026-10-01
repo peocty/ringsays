@@ -102,6 +102,18 @@ paths:
               schema: { $ref: "#/components/schemas/TokenPair" }
         "401": { $ref: "./common.yaml#/components/responses/Unauthorized" }
 
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: signOut
+      summary: Sign this device out
+      description: >-
+        Revokes this device and all its refresh tokens and clears its push tokens, so no further
+        pushes for this account reach the phone. Access tokens of the device stop working at once.
+      responses:
+        "204": { description: Signed out. }
+        "401": { $ref: "./common.yaml#/components/responses/Unauthorized" }
+
   /devices/{device_id}/push-tokens:
     put:
       tags: [Devices]

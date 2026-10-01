@@ -55,6 +55,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign this device out
+         * @description Revokes this device and all its refresh tokens and clears its push tokens, so no further pushes for this account reach the phone. Access tokens of the device stop working at once.
+         */
+        post: operations["signOut"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/devices/{device_id}/push-tokens": {
         parameters: {
             query?: never;
@@ -578,6 +598,25 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TokenPair"];
                 };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    signOut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Signed out. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             401: components["responses"]["Unauthorized"];
         };

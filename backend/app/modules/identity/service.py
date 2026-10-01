@@ -380,6 +380,23 @@ def revoke_devices_everywhere(device_ids: list[UUID]) -> None:
             log.warning("could not publish device revocation: %s", type(exc).__name__)
 
 
+def sign_out(p: ClientPrincipal, now: datetime) -> None:
+    """End this device's session on the server: device revoked, push tokens cleared (no more pushes for
+    this account to a phone someone else may sign in on next), every refresh token of the device revoked."""
+    with user_tx(p.user_id, p.phone_hash, None) as conn:
+        conn.execute(
+            update(refresh_tokens)
+            .where(refresh_tokens.c.device_id == p.device_id, refresh_tokens.c.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
+        conn.execute(
+            update(devices)
+            .where(devices.c.id == p.device_id, devices.c.revoked_at.is_(None))
+            .values(revoked_at=now, apns_token=None, pushkit_token=None, fcm_token=None)
+        )
+    revoke_devices_everywhere([p.device_id])
+
+
 def update_push_tokens(
     p: ClientPrincipal, device_id: UUID, apns: str | None, pushkit: str | None, fcm: str | None
 ) -> bool:

@@ -121,3 +121,20 @@ test("language switch flips layout at once", async ({ browser }) => {
   await expect(page.getByRole("tab", { name: "الإعدادات" })).toBeVisible();
   await page.context().close();
 });
+
+test("sign out ends the session on the server too", async ({ browser }) => {
+  const phone = newPhone();
+  const page = await signIn(browser, phone, "en");
+  const sessionKey = await page.evaluate(() => window.sessionStorage.getItem("ringsays.session"));
+  await page.getByRole("tab", { name: "Settings" }).click();
+  const logout = page.waitForResponse((r) => r.url().endsWith("/v1/auth/logout"));
+  await page.getByTestId("sign-out").click();
+  expect((await logout).status()).toBe(204);
+  await expect(page.getByTestId("phone-input")).toBeVisible();
+  // The old access token is refused at once.
+  const stored = JSON.parse(sessionKey ?? "{}") as { accessToken?: string };
+  expect(stored.accessToken).toBeTruthy();
+  const r = await fetch(`${API}/v1/inbox`, { headers: { Authorization: `Bearer ${stored.accessToken}` } });
+  expect(r.status).toBe(401);
+  await page.context().close();
+});

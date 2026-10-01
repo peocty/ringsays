@@ -169,3 +169,34 @@ test("storage that cannot be read shows an error instead of loading forever", as
   expect(await screen.findByTestId("ringsays-error")).toHaveTextContent(/went wrong/);
   expect(api.calls).toHaveLength(0);
 });
+
+test("token change: a slow answer for the old token never replaces the new intent", async () => {
+  let releaseA: () => void = () => {};
+  const gateA = new Promise<void>((r) => (releaseA = r));
+  const f = (async (input: RequestInfo | URL) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.endsWith("/tokens/A")) {
+      await gateA;
+      return new Response(JSON.stringify({ ...base, organisation_name: "Old Bank" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ ...base, organisation_name: "New Bank" }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  const s = memStore();
+  const ui = (token: string) => (
+    <RingSaysProvider baseUrl="https://api.example" storage={s} language="en" fetch={f} random={rng}>
+      <IntentCard token={token} />
+    </RingSaysProvider>
+  );
+  const r = render(ui("A"));
+  await act(async () => {
+    await new Promise((x) => setTimeout(x, 20));
+  });
+  r.rerender(ui("B"));
+  expect(await screen.findByText("New Bank")).toBeTruthy();
+  await act(async () => {
+    releaseA();
+    await new Promise((x) => setTimeout(x, 20));
+  });
+  expect(screen.queryByText("Old Bank")).toBeNull();
+  expect(screen.getByText("New Bank")).toBeTruthy();
+});

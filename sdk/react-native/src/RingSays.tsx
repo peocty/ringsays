@@ -134,14 +134,18 @@ export function useIntent(token: string | null | undefined) {
   const [sending, setSending] = useState(false);
   /** Failure of the last answer; the intent stays on screen so the customer can try again. */
   const [respondError, setRespondError] = useState<RingSaysError | null>(null);
+  // Only the latest request may update the card (the token can change while one is in flight).
+  const seq = useRef(0);
   const load = useCallback(async () => {
     if (!client || !token) return;
+    const mine = ++seq.current;
     setRespondError(null);
     setState({ status: "loading" });
     try {
-      setState({ status: "ready", intent: await client.resolve(token) });
+      const intent = await client.resolve(token);
+      if (mine === seq.current) setState({ status: "ready", intent });
     } catch (e) {
-      setState({ status: "error", error: e instanceof RingSaysError ? e : new RingSaysError({ status: 0 }) });
+      if (mine === seq.current) setState({ status: "error", error: e instanceof RingSaysError ? e : new RingSaysError({ status: 0 }) });
     }
   }, [client, token]);
   useEffect(() => {
@@ -152,11 +156,13 @@ export function useIntent(token: string | null | undefined) {
       if (!client || !token) return null;
       setSending(true);
       setRespondError(null);
+      const mine = ++seq.current;
       try {
         const updated = await client.respond(token, r);
-        setState({ status: "ready", intent: updated });
+        if (mine === seq.current) setState({ status: "ready", intent: updated });
         return updated;
       } catch (e) {
+        if (mine !== seq.current) return null;
         const err = e instanceof RingSaysError ? e : new RingSaysError({ status: 0 });
         // An ended or foreign token cannot be answered at all; anything else can be retried.
         if (err.status === 410 || err.status === 403) setState({ status: "error", error: err });

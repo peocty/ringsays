@@ -1,17 +1,18 @@
 import { RingSaysError } from "@ringsays/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Notifications from "expo-notifications";
 import { Stack, router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { Loading } from "../src/components/ui";
 import { initI18n, useLang } from "../src/i18n";
 import { AuthProvider, useAuth } from "../src/lib/auth";
-import { configureForeground, intentIdFrom } from "../src/lib/push";
+import { configureForeground, intentIdFrom, keepPushTokensCurrent } from "../src/lib/push";
+import { getSession } from "../src/lib/session";
 import { useTheme } from "../src/theme";
 
 const client = new QueryClient({
@@ -25,11 +26,29 @@ const client = new QueryClient({
 
 configureForeground();
 
+// Phones: queries refetch when the app comes back to the foreground, and polling pauses in background.
+if (Platform.OS !== "web") {
+  focusManager.setEventListener((setFocused) => {
+    const sub = AppState.addEventListener("change", (s) => setFocused(s === "active"));
+    return () => sub.remove();
+  });
+}
+
 function Routes() {
   const { t } = useTranslation();
-  const { rtl } = useLang();
+  const { lang, rtl } = useLang();
   const th = useTheme();
   const { status } = useAuth();
+
+  // Organisation reasons and names come from the server in the chosen language: reload on switch.
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    void client.invalidateQueries();
+  }, [lang]);
 
   // A tapped "organisation is calling" notification opens that intent.
   useEffect(() => {
@@ -38,9 +57,19 @@ function Routes() {
       const id = intentIdFrom(r);
       if (id) router.push(`/intent/${id}`);
     };
-    void Notifications.getLastNotificationResponseAsync().then((r) => r && open(r));
+    // Opened from a notification while signed out: handle it once, then clear it so a later sign in
+    // (maybe by someone else) does not reopen it.
+    void Notifications.getLastNotificationResponseAsync().then((r) => {
+      if (!r) return;
+      Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
+      open(r);
+    });
     const sub = Notifications.addNotificationResponseReceivedListener(open);
-    return () => sub.remove();
+    const stopTokens = keepPushTokensCurrent(async (t) => (await getSession()).updatePushTokens(t));
+    return () => {
+      sub.remove();
+      stopTokens();
+    };
   }, [status]);
 
   if (status === "loading") return <Loading />;

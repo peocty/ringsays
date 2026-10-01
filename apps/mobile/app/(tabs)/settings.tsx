@@ -12,7 +12,8 @@ import { useAuth } from "../../src/lib/auth";
 import { errorMessage } from "../../src/lib/errors";
 import { ltr } from "../../src/lib/format";
 import { keys } from "../../src/lib/keys";
-import { forgetDevice, getSession } from "../../src/lib/session";
+import { saveExport } from "../../src/lib/saveExport";
+import { forgetDevice, getSession, signOutEverywhere } from "../../src/lib/session";
 import { space, useTheme } from "../../src/theme";
 
 const ALL_DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] as const;
@@ -66,12 +67,17 @@ export default function Settings() {
     },
   });
   const exportData = useMutation({
-    mutationFn: async () => (await getSession()).exportData(),
+    mutationFn: async () => {
+      const d = await (await getSession()).exportData();
+      await saveExport(d, `ringsays-data-${new Date().toISOString().slice(0, 10)}.json`);
+      return d;
+    },
     onSuccess: (d) => {
       const list = (d as { communications_received?: unknown[] }).communications_received;
       setExported(Array.isArray(list) ? list.length : 0);
     },
   });
+  const [signingOut, setSigningOut] = useState(false);
   const erase = useMutation({
     mutationFn: async () => {
       await (await getSession()).eraseAccount();
@@ -132,11 +138,11 @@ export default function Settings() {
                   <View key={k} style={{ alignItems: "center", gap: space.xs }}>
                     <Body muted>{k === "start" ? t("settings.from") : t("settings.to")}</Body>
                     <View style={[styles.row, { direction: "ltr" }]}>
-                      <Button title="−" onPress={() => update({ night_mode: { ...quiet, [k]: shiftHour(quiet[k], -1) } })} />
+                      <Button title="−" disabled={save.isPending} onPress={() => update({ night_mode: { ...quiet, [k]: shiftHour(quiet[k], -1) } })} />
                       <Text style={{ color: th.text, fontSize: 20, minWidth: 64, textAlign: "center" }} testID={`quiet-${k}`}>
                         {quiet[k]}
                       </Text>
-                      <Button title="+" onPress={() => update({ night_mode: { ...quiet, [k]: shiftHour(quiet[k], 1) } })} />
+                      <Button title="+" disabled={save.isPending} onPress={() => update({ night_mode: { ...quiet, [k]: shiftHour(quiet[k], 1) } })} />
                     </View>
                   </View>
                 ))}
@@ -168,11 +174,20 @@ export default function Settings() {
         <Text style={[styles.h, { color: th.text }]}>{t("settings.privacy")}</Text>
         <Button title={t("settings.export")} busy={exportData.isPending} onPress={() => exportData.mutate()} testID="export" />
         {exported !== null ? <Banner tone="good">{t("settings.exportDone", { count: exported })}</Banner> : null}
+        {exportData.error ? <Banner tone="error">{errorMessage(exportData.error, t)}</Banner> : null}
         <Button
           title={t("settings.signOut")}
+          busy={signingOut}
           onPress={async () => {
-            await (await getSession()).signOut();
-            auth.markSignedOut(false);
+            setSigningOut(true);
+            try {
+              await signOutEverywhere();
+            } catch {
+              /* the phone side is cleared regardless */
+            } finally {
+              setSigningOut(false);
+              auth.markSignedOut(false);
+            }
           }}
           testID="sign-out"
         />

@@ -7,9 +7,18 @@ import { deviceSecrets } from "./secureStore";
 
 const DEVICE_KEY = "ringsays.devicekey";
 
-/** The device key is created once and kept for this install; signing in again reuses it. */
+/**
+ * Device key for this sign in. A new key is made after every sign out, so two accounts used on one
+ * phone are not linkable through a shared key. An unreadable key (Keystore invalidated after a lock
+ * screen change, for example) is replaced; the person signs in again.
+ */
 async function deviceKey(): Promise<DeviceSigner> {
-  const stored = await deviceSecrets.get(DEVICE_KEY);
+  let stored: string | null = null;
+  try {
+    stored = await deviceSecrets.get(DEVICE_KEY);
+  } catch {
+    await deviceSecrets.delete(DEVICE_KEY).catch(() => undefined);
+  }
   if (stored) {
     try {
       return SoftwareDeviceKey.fromExport(stored);
@@ -32,22 +41,39 @@ export function onSignedOut(fn: () => void): () => void {
 
 export function getSession(): Promise<Session> {
   if (!session) {
-    session = deviceKey().then(
+    const p = deviceKey().then(
       (signer) =>
         new Session({
           baseUrl: config.apiBase,
           store: deviceSecrets,
           signer,
           language: currentLang,
-          onSignedOut: () => signedOutListeners.forEach((fn) => fn()),
+          onSignedOut: () => {
+            void forgetDevice();
+            signedOutListeners.forEach((fn) => fn());
+          },
         }),
     );
+    // A failed start (secure storage unavailable) is retried on the next call, not cached.
+    p.catch(() => {
+      if (session === p) session = null;
+    });
+    session = p;
   }
   return session;
 }
 
-/** Erasing the account also forgets the device key, so nothing linkable stays on the phone. */
+/** Drop the device key and the session object; the next sign in makes a new key. */
 export async function forgetDevice(): Promise<void> {
-  await deviceSecrets.delete(DEVICE_KEY);
   session = null;
+  await deviceSecrets.delete(DEVICE_KEY);
+}
+
+/** Sign out on the server (device and push tokens revoked) and on the phone, then forget the key. */
+export async function signOutEverywhere(): Promise<void> {
+  try {
+    await (await getSession()).signOut();
+  } finally {
+    await forgetDevice().catch(() => undefined);
+  }
 }
