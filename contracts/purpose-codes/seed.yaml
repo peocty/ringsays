@@ -1,0 +1,68 @@
+# Seed purpose code catalogue for BFSI pilot tenants.
+# Arabic text is a working draft and must be reviewed by a native speaker before production.
+# max_priority caps what a tenant may send for that code; URGENT is reserved for fraud and security.
+version: 1
+codes:
+  - code: MORTGAGE.DOC.CLARIFY
+    display_text:
+      en: Home finance document clarification
+      ar: توضيح بخصوص مستندات التمويل العقاري
+    max_priority: IMPORTANT
+    max_duration_min: 10
+    allowed_channels: [SDK, PRECALL_PUSH, PSTN]
+
+  - code: LOAN.APPLICATION.UPDATE
+    display_text:
+      en: Update on your finance application
+      ar: تحديث بخصوص طلب التمويل
+    max_priority: NORMAL
+    max_duration_min: 10
+    allowed_channels: [SDK, PRECALL_PUSH, PSTN]
+
+  - code: COLLECTIONS.PAYMENT.REMINDER
+    display_text:
+      en: Payment due reminder
+      ar: تذكير بموعد السداد
+    max_priority: NORMAL
+    max_duration_min: 5
+    allowed_channels: [SDK, PRECALL_PUSH, PSTN]
+
+  - code: COLLECTIONS.ARRANGEMENT.DISCUSS
+    display_text:
+      en: Discuss a repayment arrangement
+      ar: مناقشة ترتيب السداد
+    max_priority: IMPORTANT
+    max_duration_min: 15
+    allowed_channels: [SDK, PRECALL_PUSH, PSTN]
+
+  - code: KYC.DOC.EXPIRED
+    display_text:
+      en: Identity document renewal required
+      ar: مطلوب تحديث وثيقة الهوية
+    max_priority: IMPORTANT
+    max_duration_min: 5
+    allowed_channels: [SDK, PRECALL_PUSH, PSTN]
+
+  - code: CARD.TRANSACTION.VERIFY
+    display_text:
+      en: Confirm a recent card transaction
+      ar: تأكيد عملية بطاقة حديثة
+    max_priority: URGENT
+    max_duration_min: 3
+    allowed_channels: [SDK, PRECALL_PUSH, PSTN]
+
+  - code: ACCOUNT.SERVICE.FOLLOWUP
+    display_text:
+      en: Follow up on your service request
+      ar: متابعة طلب الخدمة
+    max_priority: NORMAL
+    max_duration_min: 10
+    allowed_channels: [SDK, PRECALL_PUSH, PSTN]
+
+  - code: GUARANTEE.APPLICATION.CLARIFY
+    display_text:
+      en: Guarantee application clarification
+      ar: توضيح بخصوص طلب الكفالة
+    max_priority: IMPORTANT
+    max_duration_min: 15
+    allowed_channels: [SDK, PRECALL_PUSH, PSTN]

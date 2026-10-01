@@ -1,0 +1,7 @@
+extends:
+  - recommended
+rules:
+  info-license: off
+  operation-4xx-response: warn
+  no-server-example.com: off
+  tag-description: off

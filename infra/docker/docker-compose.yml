@@ -1,0 +1,48 @@
+# Local development stack. All external providers are MOCK adapters; nothing here talks to
+# real SMS, push, identity or bank systems. Never use these credentials outside a laptop.
+name: ringsays
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ringsays
+      POSTGRES_PASSWORD: ringsays
+      POSTGRES_DB: ringsays
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ringsays"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+
+  nats:
+    image: nats:2.10-alpine
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports: ["4222:4222", "8222:8222"]
+    volumes: [natsdata:/data]
+
+  api:
+    build: ../../backend
+    environment:
+      RINGSAYS_ENVIRONMENT: local
+      RINGSAYS_DATABASE_URL: postgresql+psycopg://ringsays:ringsays@postgres:5432/ringsays
+      RINGSAYS_REDIS_URL: redis://redis:6379/0
+      RINGSAYS_NATS_URL: nats://nats:4222
+      RINGSAYS_USE_MOCK_ADAPTERS: "true"
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      nats: { condition: service_started }
+
+volumes:
+  pgdata:
+  natsdata:

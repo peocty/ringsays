@@ -1,0 +1,32 @@
+# Canonical Communication Intent lifecycle.
+# Backend (Python) and shared TypeScript domain package both test against this file.
+# Changing it requires an ADR and updated tests on both sides.
+transitions:
+  - { from: DRAFT, to: REQUESTED, actors: [CALLER] }
+  - { from: DRAFT, to: CANCELLED, actors: [CALLER] }
+  - { from: REQUESTED, to: DELIVERED, actors: [SYSTEM] }
+  - { from: REQUESTED, to: EXPIRED, actors: [SYSTEM] }
+  - { from: REQUESTED, to: CANCELLED, actors: [CALLER] }
+  - { from: DELIVERED, to: ACCEPTED, actors: [RECEIVER] }
+  - { from: DELIVERED, to: RESCHEDULED, actors: [RECEIVER] }
+  - { from: DELIVERED, to: SCHEDULED, actors: [RECEIVER] }
+  - { from: DELIVERED, to: DECLINED, actors: [RECEIVER] }
+  - { from: DELIVERED, to: EXPIRED, actors: [SYSTEM] }
+  - { from: DELIVERED, to: CANCELLED, actors: [CALLER] }
+  - { from: ACCEPTED, to: IN_PROGRESS, actors: [SYSTEM] }
+  - { from: ACCEPTED, to: EXPIRED, actors: [SYSTEM] }
+  - { from: ACCEPTED, to: CANCELLED, actors: [CALLER] }
+  - { from: RESCHEDULED, to: SCHEDULED, actors: [CALLER] }
+  - { from: RESCHEDULED, to: DECLINED, actors: [RECEIVER] }
+  - { from: RESCHEDULED, to: CANCELLED, actors: [CALLER, RECEIVER] }
+  - { from: RESCHEDULED, to: EXPIRED, actors: [SYSTEM] }
+  - { from: SCHEDULED, to: IN_PROGRESS, actors: [SYSTEM] }
+  - { from: SCHEDULED, to: RESCHEDULED, actors: [CALLER, RECEIVER] }
+  - { from: SCHEDULED, to: DECLINED, actors: [RECEIVER] }
+  - { from: SCHEDULED, to: CANCELLED, actors: [CALLER, RECEIVER] }
+  - { from: SCHEDULED, to: EXPIRED, actors: [SYSTEM] }
+  - { from: IN_PROGRESS, to: COMPLETED, actors: [CALLER, RECEIVER, SYSTEM] }
+  - { from: IN_PROGRESS, to: FOLLOW_UP_REQUIRED, actors: [CALLER, RECEIVER, SYSTEM] }
+  - { from: FOLLOW_UP_REQUIRED, to: COMPLETED, actors: [CALLER, RECEIVER, SYSTEM] }
+terminal: [COMPLETED, DECLINED, CANCELLED, EXPIRED]
+expirable: [REQUESTED, DELIVERED, ACCEPTED, RESCHEDULED, SCHEDULED]

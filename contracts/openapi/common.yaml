@@ -1,0 +1,297 @@
+openapi: 3.1.0
+info:
+  title: RingSays shared components
+  version: 0.1.0
+  description: Schemas, parameters and responses shared by Enterprise, Client and Admin APIs.
+paths: {}
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Client generated UUID. Repeating a request with same key returns original result.
+      schema:
+        type: string
+        format: uuid
+    IntentId:
+      name: intent_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/IntentId"
+    AcceptLanguage:
+      name: Accept-Language
+      in: header
+      required: false
+      description: Language for rendered display text. Supported values en, ar.
+      schema:
+        type: string
+        enum: [en, ar]
+        default: en
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+
+  responses:
+    BadRequest:
+      description: Request is malformed or fails validation.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unauthorized:
+      description: Missing or invalid credentials.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Forbidden:
+      description: Credentials valid but not allowed for this resource or tenant.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: Resource does not exist or is not visible to caller.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Conflict:
+      description: Request conflicts with current state, for example an invalid status transition.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Gone:
+      description: Resource has expired.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    UnprocessableEntity:
+      description: Request is well formed but violates a business rule, for example priority above purpose code cap.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    TooManyRequests:
+      description: Rate limit or quota exceeded.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+  schemas:
+    IntentId:
+      type: string
+      description: UUIDv7, time ordered.
+      format: uuid
+
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          examples: ["https://errors.ringsays.app/invalid-transition"]
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+          description: Stable machine readable error code.
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }
+
+    E164:
+      type: string
+      pattern: '^\+[1-9]\d{6,14}$'
+      examples: ["+966500000000"]
+
+    LocalisedText:
+      type: object
+      required: [en, ar]
+      properties:
+        en: { type: string, maxLength: 160 }
+        ar: { type: string, maxLength: 160 }
+
+    Priority:
+      type: string
+      enum: [LOW, NORMAL, IMPORTANT, URGENT]
+
+    IntentStatus:
+      type: string
+      enum:
+        - DRAFT
+        - REQUESTED
+        - DELIVERED
+        - ACCEPTED
+        - RESCHEDULED
+        - DECLINED
+        - SCHEDULED
+        - IN_PROGRESS
+        - COMPLETED
+        - FOLLOW_UP_REQUIRED
+        - CANCELLED
+        - EXPIRED
+
+    IntentSource:
+      type: string
+      description: Whether reason was declared by caller, predicted by RingSays, or unknown. Predicted reasons are never shown as declared.
+      enum: [DECLARED, PREDICTED, UNKNOWN]
+
+    VerificationLevel:
+      type: string
+      description: Computed by RingSays, never supplied by caller.
+      enum: [NONE, PHONE, ORG, ORG_AGENT_NUMBER]
+
+    Channel:
+      type: string
+      enum: [VOIP, SDK, PRECALL_PUSH, PSTN, PLATFORM_CALLER_ID]
+
+    OutcomeCode:
+      type: string
+      enum:
+        - RESOLVED
+        - FOLLOW_UP_REQUIRED
+        - NO_DECISION
+        - CALL_BACK
+        - DOCUMENT_REQUIRED
+        - TASK_CREATED
+        - MEETING_REQUIRED
+        - ESCALATED
+        - CANCELLED
+
+    DeclineReason:
+      type: string
+      enum: [NOT_INTERESTED, WRONG_PERSON, ALREADY_RESOLVED, NOT_NOW, MESSAGE_INSTEAD, OTHER]
+
+    Slot:
+      type: object
+      required: [start, end]
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+
+    PartyRef:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [USER, TENANT_AGENT, PHONE]
+        user_id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        department_id: { type: string, format: uuid }
+        agent_id: { type: string }
+        phone: { $ref: "#/components/schemas/E164" }
+
+    IntentEvent:
+      type: object
+      required: [at, from_status, to_status, actor]
+      properties:
+        at: { type: string, format: date-time }
+        from_status: { $ref: "#/components/schemas/IntentStatus" }
+        to_status: { $ref: "#/components/schemas/IntentStatus" }
+        actor:
+          type: string
+          enum: [CALLER, RECEIVER, SYSTEM]
+
+    Intent:
+      type: object
+      required:
+        - intent_id
+        - from_party
+        - to_party
+        - priority
+        - expected_duration_min
+        - intent_source
+        - verification_level
+        - valid_from
+        - valid_until
+        - status
+        - attempt_count
+        - created_at
+        - updated_at
+      properties:
+        intent_id: { $ref: "#/components/schemas/IntentId" }
+        tenant_id: { type: [string, "null"], format: uuid }
+        from_party: { $ref: "#/components/schemas/PartyRef" }
+        to_party: { $ref: "#/components/schemas/PartyRef" }
+        on_behalf_of:
+          oneOf:
+            - { $ref: "#/components/schemas/PartyRef" }
+            - { type: "null" }
+        purpose_code: { type: [string, "null"] }
+        display_text:
+          oneOf:
+            - { $ref: "#/components/schemas/LocalisedText" }
+            - { type: "null" }
+        subject:
+          type: [string, "null"]
+          maxLength: 120
+          description: Consumer free text only. Always rendered in unverified style.
+        masked_reference:
+          type: [string, "null"]
+          pattern: '^[A-Za-z0-9]{3,4}$'
+        priority: { $ref: "#/components/schemas/Priority" }
+        expected_duration_min: { type: integer, minimum: 1, maximum: 120 }
+        deadline: { type: [string, "null"], format: date-time }
+        preferred_channels:
+          type: array
+          items: { $ref: "#/components/schemas/Channel" }
+        channel_used:
+          oneOf:
+            - { $ref: "#/components/schemas/Channel" }
+            - { type: "null" }
+        intent_source: { $ref: "#/components/schemas/IntentSource" }
+        verification_level: { $ref: "#/components/schemas/VerificationLevel" }
+        consent_ref: { type: [string, "null"] }
+        parent_intent_id:
+          type: [string, "null"]
+          format: uuid
+        attempt_count: { type: integer, minimum: 0 }
+        language: { type: string, enum: [en, ar] }
+        valid_from: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+        status: { $ref: "#/components/schemas/IntentStatus" }
+        scheduled_slot:
+          oneOf:
+            - { $ref: "#/components/schemas/Slot" }
+            - { type: "null" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        timeline:
+          type: array
+          items: { $ref: "#/components/schemas/IntentEvent" }

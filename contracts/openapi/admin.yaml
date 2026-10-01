@@ -1,0 +1,237 @@
+openapi: 3.1.0
+info:
+  title: RingSays Admin API
+  version: 0.1.0
+  description: |
+    API behind enterprise portal and RingSays back office.
+    Authenticated by OIDC; roles TENANT_ADMIN, INTEGRATION_ADMIN, SUPERVISOR, AGENT, COMPLIANCE, RS_REVIEWER.
+    Every write is audited with actor and reason.
+servers:
+  - url: https://admin-api.ringsays.example/v1
+security:
+  - oidc: []
+tags:
+  - name: Organisation
+  - name: Catalogue review
+  - name: Integration
+  - name: Audit
+
+paths:
+  /tenants/{tenant_id}:
+    get:
+      tags: [Organisation]
+      operationId: getTenant
+      summary: Get tenant profile
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+      responses:
+        "200":
+          description: Tenant.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Tenant" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+
+  /tenants/{tenant_id}/agents:
+    get:
+      tags: [Organisation]
+      operationId: listAgents
+      summary: List agents
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "./common.yaml#/components/parameters/Cursor"
+        - $ref: "./common.yaml#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Agents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Agent" }
+                  next_cursor: { type: [string, "null"] }
+    post:
+      tags: [Organisation]
+      operationId: createAgent
+      summary: Create agent
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "./common.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Agent" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+
+  /tenants/{tenant_id}/calling-numbers:
+    post:
+      tags: [Organisation]
+      operationId: addCallingNumber
+      summary: Add calling number for verification
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "./common.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CallingNumber" }
+      responses:
+        "201":
+          description: Added, status PENDING_VERIFICATION.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CallingNumber" }
+
+  /review/purpose-codes/{tenant_id}/{code}:
+    post:
+      tags: [Catalogue review]
+      operationId: reviewPurposeCode
+      summary: RingSays reviewer approves or rejects a purpose code
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason]
+              properties:
+                decision: { type: string, enum: [APPROVE, REJECT] }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        "200": { description: Decision recorded. }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+
+  /tenants/{tenant_id}/webhook-endpoints:
+    post:
+      tags: [Integration]
+      operationId: createWebhookEndpoint
+      summary: Create webhook endpoint
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, events]
+              properties:
+                url: { type: string, format: uri, pattern: '^https://' }
+                events:
+                  type: array
+                  minItems: 1
+                  items: { type: string }
+      responses:
+        "201":
+          description: Created; secret shown once.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [endpoint_id, secret]
+                properties:
+                  endpoint_id: { type: string, format: uuid }
+                  secret: { type: string }
+
+  /tenants/{tenant_id}/audit-events:
+    get:
+      tags: [Audit]
+      operationId: listAuditEvents
+      summary: List audit events
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "./common.yaml#/components/parameters/Cursor"
+        - $ref: "./common.yaml#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Audit events, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditEvent" }
+                  next_cursor: { type: [string, "null"] }
+
+components:
+  securitySchemes:
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: https://auth.ringsays.example/.well-known/openid-configuration
+
+  parameters:
+    TenantId:
+      name: tenant_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    Tenant:
+      type: object
+      required: [tenant_id, legal_name, residency_region, verification_status]
+      properties:
+        tenant_id: { type: string, format: uuid }
+        legal_name: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
+        commercial_registration: { type: string }
+        domain: { type: string }
+        residency_region: { type: string, enum: [KSA, IN, AE, EU] }
+        verification_status: { type: string, enum: [PENDING, VERIFIED, SUSPENDED] }
+
+    Agent:
+      type: object
+      required: [agent_id, display_name, department_id]
+      properties:
+        agent_id: { type: string }
+        display_name: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
+        department_id: { type: string, format: uuid }
+        employee_ref: { type: string, description: Tenant internal reference; no personal phone stored. }
+        active: { type: boolean, default: true }
+
+    CallingNumber:
+      type: object
+      required: [phone]
+      properties:
+        phone: { $ref: "./common.yaml#/components/schemas/E164" }
+        department_id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [PENDING_VERIFICATION, VERIFIED, REVOKED]
+          readOnly: true
+        cst_entity_name_registered:
+          type: boolean
+          description: Whether number is registered in operator caller name programme.
+
+    AuditEvent:
+      type: object
+      required: [event_id, at, actor, action, object_type, object_id, hash, prev_hash]
+      properties:
+        event_id: { type: string, format: uuid }
+        at: { type: string, format: date-time }
+        actor: { type: string }
+        action: { type: string }
+        object_type: { type: string }
+        object_id: { type: string }
+        reason: { type: [string, "null"] }
+        hash: { type: string }
+        prev_hash: { type: string }

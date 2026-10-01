@@ -1,0 +1,358 @@
+openapi: 3.1.0
+info:
+  title: RingSays Enterprise API
+  version: 0.1.0
+  description: |
+    Server to server API for enterprise tenants (banks, lenders, insurers, agencies).
+    Tenants send minimum context: customer phone, purpose code, masked reference.
+    Customer master data never leaves tenant systems.
+  contact:
+    name: PEOCIT Technologies
+servers:
+  - url: https://api.ringsays.example/v1
+    description: Placeholder, replaced per deployment and residency region
+security:
+  - oauth2: [intents:write, intents:read]
+tags:
+  - name: Intents
+  - name: Purpose codes
+
+paths:
+  /intents:
+    post:
+      tags: [Intents]
+      operationId: createIntent
+      summary: Create a communication intent
+      security:
+        - oauth2: [intents:write]
+      parameters:
+        - $ref: "./common.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntentCreate"
+            example:
+              to: { phone: "+966500000000" }
+              agent_id: "agt_01J9ZK3M"
+              purpose_code: "MORTGAGE.DOC.CLARIFY"
+              masked_reference: "8291"
+              priority: NORMAL
+              expected_duration_min: 5
+              valid_from: "2026-10-04T07:30:00Z"
+              valid_until: "2026-10-04T08:00:00Z"
+              channel_preference: [SDK, PRECALL_PUSH, PSTN]
+              language: ar
+      responses:
+        "201":
+          description: Intent created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntentCreated"
+        "200":
+          description: Same Idempotency-Key replayed; original intent returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntentCreated"
+        "400": { $ref: "./common.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./common.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "422": { $ref: "./common.yaml#/components/responses/UnprocessableEntity" }
+        "429": { $ref: "./common.yaml#/components/responses/TooManyRequests" }
+
+  /intents/{intent_id}:
+    get:
+      tags: [Intents]
+      operationId: getIntent
+      summary: Get intent status, channel used and timeline
+      security:
+        - oauth2: [intents:read]
+      parameters:
+        - $ref: "./common.yaml#/components/parameters/IntentId"
+      responses:
+        "200":
+          description: Intent.
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/Intent"
+        "401": { $ref: "./common.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+
+  /intents/{intent_id}/cancel:
+    post:
+      tags: [Intents]
+      operationId: cancelIntent
+      summary: Withdraw an intent before contact
+      security:
+        - oauth2: [intents:write]
+      parameters:
+        - $ref: "./common.yaml#/components/parameters/IntentId"
+        - $ref: "./common.yaml#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Intent cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/Intent"
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+
+  /intents/{intent_id}/calling:
+    post:
+      tags: [Intents]
+      operationId: signalCalling
+      summary: Signal that agent is dialling now
+      description: Triggers pre call push and arms platform caller ID. Allowed only for ACCEPTED or SCHEDULED intents inside their validity window.
+      security:
+        - oauth2: [intents:write]
+      parameters:
+        - $ref: "./common.yaml#/components/parameters/IntentId"
+        - $ref: "./common.yaml#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Pre call signal accepted for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/Intent"
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+        "410": { $ref: "./common.yaml#/components/responses/Gone" }
+
+  /intents/{intent_id}/outcome:
+    post:
+      tags: [Intents]
+      operationId: recordOutcome
+      summary: Record outcome from tenant side
+      security:
+        - oauth2: [intents:write]
+      parameters:
+        - $ref: "./common.yaml#/components/parameters/IntentId"
+        - $ref: "./common.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OutcomeCreate"
+      responses:
+        "200":
+          description: Outcome recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/Intent"
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+
+  /purpose-codes:
+    get:
+      tags: [Purpose codes]
+      operationId: listPurposeCodes
+      summary: List tenant purpose code catalogue
+      security:
+        - oauth2: [catalogue:read]
+      parameters:
+        - $ref: "./common.yaml#/components/parameters/Cursor"
+        - $ref: "./common.yaml#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Purpose codes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PurposeCode" }
+                  next_cursor: { type: [string, "null"] }
+    post:
+      tags: [Purpose codes]
+      operationId: proposePurposeCode
+      summary: Propose a new purpose code; enters RingSays review
+      security:
+        - oauth2: [catalogue:write]
+      parameters:
+        - $ref: "./common.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurposeCodeCreate"
+      responses:
+        "201":
+          description: Proposed, status PENDING_REVIEW.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurposeCode"
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+        "422": { $ref: "./common.yaml#/components/responses/UnprocessableEntity" }
+
+webhooks:
+  intentEvent:
+    post:
+      summary: Intent lifecycle event delivered to tenant endpoint
+      description: |
+        Signed with HMAC SHA 256 over `timestamp + "." + body` using endpoint secret.
+        Header `RingSays-Signature: t=<unix seconds>,v1=<hex digest>`. Reject if timestamp older than 300 seconds.
+        Retries with exponential backoff for 24 hours, then dead letter.
+      parameters:
+        - name: RingSays-Signature
+          in: header
+          required: true
+          schema: { type: string }
+        - name: RingSays-Event-Id
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEvent"
+      responses:
+        "2XX":
+          description: Event accepted by tenant.
+
+components:
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      description: Client credentials; optional mutual TLS bound tokens.
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.ringsays.example/oauth/token
+          scopes:
+            intents:write: Create and change intents
+            intents:read: Read intents
+            catalogue:read: Read purpose codes
+            catalogue:write: Propose purpose codes
+
+  schemas:
+    IntentCreate:
+      type: object
+      additionalProperties: false
+      required: [to, agent_id, purpose_code, priority, expected_duration_min, valid_from, valid_until]
+      properties:
+        to:
+          type: object
+          required: [phone]
+          additionalProperties: false
+          properties:
+            phone: { $ref: "./common.yaml#/components/schemas/E164" }
+        agent_id: { type: string, maxLength: 64 }
+        department_id: { type: string, format: uuid }
+        purpose_code:
+          type: string
+          pattern: '^[A-Z0-9]+(\.[A-Z0-9]+){1,4}$'
+        masked_reference:
+          type: string
+          pattern: '^[A-Za-z0-9]{3,4}$'
+          description: Last 3 or 4 characters only. Full references are rejected.
+        priority: { $ref: "./common.yaml#/components/schemas/Priority" }
+        expected_duration_min: { type: integer, minimum: 1, maximum: 120 }
+        deadline: { type: string, format: date-time }
+        valid_from: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+        channel_preference:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "./common.yaml#/components/schemas/Channel" }
+        consent_ref: { type: string, maxLength: 128 }
+        parent_intent_id: { type: string, format: uuid }
+        language: { type: string, enum: [en, ar], default: ar }
+
+    IntentCreated:
+      type: object
+      required: [intent_id, status, verification_level]
+      properties:
+        intent_id: { $ref: "./common.yaml#/components/schemas/IntentId" }
+        status: { $ref: "./common.yaml#/components/schemas/IntentStatus" }
+        verification_level: { $ref: "./common.yaml#/components/schemas/VerificationLevel" }
+        context_token:
+          type: [string, "null"]
+          description: Returned only when SDK delivery is selected; tenant app passes it to embedded SDK.
+
+    OutcomeCreate:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { $ref: "./common.yaml#/components/schemas/OutcomeCode" }
+        follow_up_at: { type: string, format: date-time }
+
+    PurposeCodeCreate:
+      type: object
+      additionalProperties: false
+      required: [code, display_text, max_priority, max_duration_min, allowed_channels]
+      properties:
+        code:
+          type: string
+          pattern: '^[A-Z0-9]+(\.[A-Z0-9]+){1,4}$'
+        display_text: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
+        max_priority: { $ref: "./common.yaml#/components/schemas/Priority" }
+        max_duration_min: { type: integer, minimum: 1, maximum: 120 }
+        allowed_channels:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "./common.yaml#/components/schemas/Channel" }
+
+    PurposeCode:
+      allOf:
+        - $ref: "#/components/schemas/PurposeCodeCreate"
+        - type: object
+          required: [status, version]
+          properties:
+            status:
+              type: string
+              enum: [PENDING_REVIEW, APPROVED, REJECTED, RETIRED]
+            version: { type: integer, minimum: 1 }
+
+    WebhookEvent:
+      type: object
+      required: [event_id, type, occurred_at, intent_id, status]
+      properties:
+        event_id: { type: string, format: uuid }
+        type:
+          type: string
+          enum:
+            - intent.delivered
+            - intent.accepted
+            - intent.rescheduled
+            - intent.scheduled
+            - intent.declined
+            - intent.expired
+            - intent.cancelled
+            - slot.proposed
+            - outcome.recorded
+        occurred_at: { type: string, format: date-time }
+        intent_id: { $ref: "./common.yaml#/components/schemas/IntentId" }
+        status: { $ref: "./common.yaml#/components/schemas/IntentStatus" }
+        channel_used:
+          oneOf:
+            - { $ref: "./common.yaml#/components/schemas/Channel" }
+            - { type: "null" }
+        slot:
+          oneOf:
+            - { $ref: "./common.yaml#/components/schemas/Slot" }
+            - { type: "null" }
+        decline_reason:
+          oneOf:
+            - { $ref: "./common.yaml#/components/schemas/DeclineReason" }
+            - { type: "null" }
+        outcome_code:
+          oneOf:
+            - { $ref: "./common.yaml#/components/schemas/OutcomeCode" }
+            - { type: "null" }

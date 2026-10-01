@@ -1,0 +1,81 @@
+asyncapi: 3.0.0
+info:
+  title: RingSays internal events
+  version: 0.1.0
+  description: |
+    Domain events written to transactional outbox and relayed to NATS JetStream.
+    Subject pattern: ringsays.<tenant_id or "consumer">.<aggregate>.<event>.
+    Payloads carry identifiers and status only; never phone numbers, names or free text.
+defaultContentType: application/json
+
+channels:
+  intentLifecycle:
+    address: "ringsays.{scope}.intent.{event}"
+    parameters:
+      scope:
+        description: Tenant id, or "consumer" for consumer to consumer intents.
+      event:
+        description: Event name, for example status_changed.
+    messages:
+      intentStatusChanged:
+        $ref: "#/components/messages/IntentStatusChanged"
+      intentCreated:
+        $ref: "#/components/messages/IntentCreated"
+
+operations:
+  publishIntentStatusChanged:
+    action: send
+    channel:
+      $ref: "#/channels/intentLifecycle"
+    messages:
+      - $ref: "#/channels/intentLifecycle/messages/intentStatusChanged"
+  publishIntentCreated:
+    action: send
+    channel:
+      $ref: "#/channels/intentLifecycle"
+    messages:
+      - $ref: "#/channels/intentLifecycle/messages/intentCreated"
+
+components:
+  messages:
+    IntentCreated:
+      name: intent.created
+      payload:
+        $ref: "#/components/schemas/IntentCreatedPayload"
+    IntentStatusChanged:
+      name: intent.status_changed
+      payload:
+        $ref: "#/components/schemas/IntentStatusChangedPayload"
+
+  schemas:
+    Envelope:
+      type: object
+      required: [event_id, occurred_at, schema_version]
+      properties:
+        event_id: { type: string, format: uuid }
+        occurred_at: { type: string, format: date-time }
+        schema_version: { type: integer, const: 1 }
+        tenant_id: { type: [string, "null"], format: uuid }
+
+    IntentCreatedPayload:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [intent_id, priority, valid_until]
+          properties:
+            intent_id: { type: string, format: uuid }
+            purpose_code: { type: [string, "null"] }
+            priority: { type: string, enum: [LOW, NORMAL, IMPORTANT, URGENT] }
+            valid_until: { type: string, format: date-time }
+
+    IntentStatusChangedPayload:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [intent_id, from_status, to_status, actor]
+          properties:
+            intent_id: { type: string, format: uuid }
+            from_status: { type: string }
+            to_status: { type: string }
+            actor: { type: string, enum: [CALLER, RECEIVER, SYSTEM] }
+            reason: { type: [string, "null"] }

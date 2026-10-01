@@ -1,0 +1,22 @@
+{
+  "name": "ringsays",
+  "private": true,
+  "version": "0.1.0",
+  "description": "RingSays communication intent, context and trust platform",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "lint:contracts": "redocly lint contracts/openapi/enterprise.yaml contracts/openapi/client.yaml contracts/openapi/admin.yaml"
+  },
+  "devDependencies": {
+    "@redocly/cli": "1.34.3",
+    "@types/node": "^22.20.4",
+    "turbo": "2.5.4",
+    "typescript": "5.8.3"
+  }
+}
