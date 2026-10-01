@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.core import auth, problems
 from app.core.config import settings
+from app.modules.admin import api as admin_api
+from app.modules.admin import backoffice_api
 from app.modules.client import api as client_api
 from app.modules.client.directory import DbRecipientDirectory
 from app.modules.delivery import adapters
@@ -20,6 +23,23 @@ problems.install(app)
 app.include_router(auth.router)
 app.include_router(intent_api.router)
 app.include_router(client_api.router)
+app.include_router(admin_api.router)
+if settings.backoffice_enabled:
+    app.include_router(backoffice_api.router)
+if settings.dev_oidc_enabled and settings.environment == "local":
+    from app.modules.devoidc import api as devoidc_api
+
+    app.include_router(devoidc_api.router)
+
+# Portal runs on its own origin. Bearer tokens (never cookies), so no credentials mode is needed.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.portal_origins,
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type", "Accept-Language", "If-Match", "Idempotency-Key"],
+    expose_headers=["ETag", "Content-Disposition"],
+    max_age=600,
+)
 
 
 @app.get("/health", tags=["Ops"])

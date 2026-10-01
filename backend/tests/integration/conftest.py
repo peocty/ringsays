@@ -54,6 +54,7 @@ def database() -> Iterator[dict[str, str]]:
         "owner": _url_for("ringsays_owner", "ringsays_owner"),
         "app": _url_for("ringsays_app", "ringsays_app"),
         "worker": _url_for("ringsays_worker", "ringsays_worker"),
+        "backoffice": _url_for("ringsays_backoffice", "ringsays_backoffice"),
     }
     env = {**os.environ, "RINGSAYS_MIGRATION_DATABASE_URL": urls["owner"]}
     subprocess.run(
@@ -66,11 +67,14 @@ def database() -> Iterator[dict[str, str]]:
     settings.database_url = urls["app"]
     settings.worker_database_url = urls["worker"]
     settings.migration_database_url = urls["owner"]
+    settings.backoffice_database_url = urls["backoffice"]
     db.get_engine.cache_clear()
     db.get_worker_engine.cache_clear()
+    db.get_backoffice_engine.cache_clear()
     yield urls
     db.get_engine().dispose()
     db.get_worker_engine().dispose()
+    db.get_backoffice_engine().dispose()
     with admin.connect() as c:
         c.execute(text(f"DROP DATABASE IF EXISTS {TEST_DB} WITH (FORCE)"))
     admin.dispose()
@@ -112,11 +116,13 @@ def clock() -> Clock:
 @pytest.fixture
 def client(database: dict[str, str], clock: Clock) -> Iterator[TestClient]:
     from app.main import app
+    from app.modules.admin import api as admin_api
     from app.modules.client import api as client_api
     from app.modules.intent import api
 
     app.dependency_overrides[api.clock] = clock
     app.dependency_overrides[client_api.clock] = clock
+    app.dependency_overrides[admin_api.clock] = clock
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
@@ -179,6 +185,12 @@ def _isolated_limits_and_adapters() -> Iterator[None]:
     from app.modules.identity import service as identity
 
     adapters.configure(adapters.MockRecipientDirectory(), adapters.MockPushSender())
+    import tempfile
+
+    from app.platform import blobs
+
+    blob_dir = tempfile.mkdtemp(prefix="ringsays-blobs-")
+    blobs.set_store(blobs.LocalBlobStore(blob_dir))
     identity.configure_sms(identity.MockSmsSender())
     identity.clear_device_cache()
     auth_mod.clear_client_status_cache()
@@ -189,6 +201,7 @@ def _isolated_limits_and_adapters() -> Iterator[None]:
         settings.tenant_creates_per_minute,
     ) = saved
     ratelimit.set_limiter(None)
+    blobs.set_store(None)
 
 
 class AppUser:
@@ -239,3 +252,52 @@ class AppUser:
         from cryptography.hazmat.primitives.asymmetric import ec
 
         return base64.b64encode(self.key.sign(message.encode(), ec.ECDSA(hashes.SHA256()))).decode()
+
+
+class PortalPerson:
+    """A person signed in to the portal through the MOCK OpenID Connect issuer."""
+
+    def __init__(self, client: TestClient, email: str) -> None:
+        from app.modules.devoidc import issuer
+
+        self.client, self.email = client, email
+        self.token = issuer.tokens_for(email)["access_token"]
+        r = client.get("/admin/v1/me", headers=self.headers)
+        assert r.status_code == 200, r.text
+        self.me = r.json()
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.token}"}
+
+
+def unique_email(prefix: str = "person") -> str:
+    import uuid as _uuid
+
+    return f"{prefix}.{_uuid.uuid4().hex[:10]}@mockbank.example"
+
+
+def portal_member(
+    client: TestClient,
+    owner_engine: Engine,
+    t: SeededTenant,
+    roles: list[str],
+    *,
+    agent_id: str | None = None,
+    email: str | None = None,
+) -> PortalPerson:
+    from app.scripts.seed import invite_portal_user
+
+    email = email or unique_email(roles[0].lower())
+    invite_portal_user(owner_engine, t.tenant_id, email, roles, agent_id=agent_id)
+    return PortalPerson(client, email)
+
+
+def staff_member(client: TestClient, owner_engine: Engine, roles: list[str]) -> PortalPerson:
+    import uuid as _uuid
+
+    from app.scripts.seed import seed_staff
+
+    email = f"staff.{_uuid.uuid4().hex[:10]}@ringsays.example"
+    seed_staff(owner_engine, email, roles)
+    return PortalPerson(client, email)

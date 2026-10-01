@@ -28,6 +28,9 @@ tenants = Table(
     Column("residency_region", Text, nullable=False),
     Column("verification_status", Text, nullable=False),
     Column("created_at", DateTime(timezone=True)),
+    Column("sector", Text, nullable=False),
+    Column("suspended_reason", Text),
+    Column("status_before_suspension", Text),
     schema="enterprise",
 )
 
@@ -63,6 +66,10 @@ calling_numbers = Table(
     Column("phone", Text, nullable=False),
     Column("status", Text, nullable=False),
     Column("cst_registered", Boolean, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("reviewed_at", DateTime(timezone=True)),
+    Column("reviewed_by", Text),
+    Column("review_reason", Text),
     schema="enterprise",
 )
 
@@ -78,6 +85,10 @@ purpose_codes = Table(
     Column("max_duration_min", Integer, nullable=False),
     Column("allowed_channels", ARRAY(Text), nullable=False),
     Column("status", Text, nullable=False),
+    Column("proposed_at", DateTime(timezone=True)),
+    Column("reviewed_at", DateTime(timezone=True)),
+    Column("reviewed_by", Text),
+    Column("review_reason", Text),
     schema="enterprise",
 )
 
@@ -319,4 +330,71 @@ consents = Table(
     Column("granted_at", DateTime(timezone=True), nullable=False),
     Column("withdrawn_at", DateTime(timezone=True)),
     schema="identity",
+)
+
+
+portal_users = Table(
+    "portal_users",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("tenant_id", UUID(as_uuid=True), nullable=False),
+    Column("email", Text, nullable=False),
+    Column("display_name", Text),
+    Column("oidc_issuer", Text),
+    Column("oidc_subject", Text),
+    Column("roles", ARRAY(Text), nullable=False),
+    Column("agent_id", Text),
+    Column("status", Text, nullable=False),
+    Column("invited_by", Text, nullable=False),
+    Column("invite_expires_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True)),
+    Column("last_sign_in_at", DateTime(timezone=True)),
+    schema="enterprise",
+)
+
+staff_users = Table(
+    "staff_users",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("email", Text, nullable=False),
+    Column("display_name", Text),
+    Column("oidc_issuer", Text),
+    Column("oidc_subject", Text),
+    Column("roles", ARRAY(Text), nullable=False),
+    Column("status", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("last_sign_in_at", DateTime(timezone=True)),
+    schema="platform",
+)
+
+verification_documents = Table(
+    "verification_documents",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("tenant_id", UUID(as_uuid=True), nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("reference", Text),
+    Column("file_name", Text, nullable=False),
+    Column("content_type", Text, nullable=False),
+    Column("size_bytes", Integer, nullable=False),
+    Column("sha256", Text, nullable=False),
+    Column("blob_key", Text, nullable=False),
+    Column("uploaded_by", Text, nullable=False),
+    Column("uploaded_at", DateTime(timezone=True), nullable=False),
+    schema="enterprise",
+)
+
+verification_requests = Table(
+    "verification_requests",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("tenant_id", UUID(as_uuid=True), nullable=False),
+    Column("status", Text, nullable=False),
+    Column("document_ids", ARRAY(UUID(as_uuid=True)), nullable=False),
+    Column("submitted_by", Text, nullable=False),
+    Column("submitted_at", DateTime(timezone=True), nullable=False),
+    Column("decided_by", Text),
+    Column("decided_at", DateTime(timezone=True)),
+    Column("decision_reason", Text),
+    schema="enterprise",
 )

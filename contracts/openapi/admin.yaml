@@ -1,44 +1,159 @@
 openapi: 3.1.0
 info:
   title: RingSays Admin API
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    API behind enterprise portal and RingSays back office.
-    Authenticated by OIDC; roles TENANT_ADMIN, INTEGRATION_ADMIN, SUPERVISOR, AGENT, COMPLIANCE, RS_REVIEWER.
-    Every write is audited with actor and reason.
+    API behind the enterprise portal and the RingSays back office.
+
+    Authentication: OpenID Connect. The identity provider proves who the person is (`iss`, `sub`, verified
+    email). RingSays decides what they may do: tenant memberships and roles are stored by RingSays, so a
+    role change or a disabled user takes effect on the next request, not at token expiry.
+
+    Tenant roles: TENANT_ADMIN, INTEGRATION_ADMIN, SUPERVISOR, AGENT, COMPLIANCE.
+    RingSays staff roles: RS_REVIEWER (decides reviews), RS_ADMIN (creates and suspends tenants).
+
+    Back office paths (`/backoffice/...`, `/review/...`) are served only by the internal back office
+    deployment, which holds the back office database role. The tenant facing deployment answers 404.
+
+    Every write is recorded in the tenant's hash chained audit log with actor and, where required, reason.
+    Phone numbers are never returned in full by this API.
 servers:
-  - url: https://admin-api.ringsays.example/v1
+  - url: https://api.ringsays.example/admin/v1
 security:
   - oidc: []
 tags:
+  - name: Session
   - name: Organisation
-  - name: Catalogue review
+  - name: Verification
+  - name: Users
+  - name: Catalogue
   - name: Integration
+  - name: Monitor
   - name: Audit
+  - name: Back office
 
 paths:
+  /me:
+    get:
+      tags: [Session]
+      operationId: getMe
+      summary: Signed in person, tenant memberships and staff roles
+      description: First sign in with a verified email activates pending invitations for that email.
+      responses:
+        "200":
+          description: Session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "./common.yaml#/components/responses/Unauthorized" }
+
+  # Organisation
+
   /tenants/{tenant_id}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
     get:
       tags: [Organisation]
       operationId: getTenant
       summary: Get tenant profile
-      parameters:
-        - $ref: "#/components/parameters/TenantId"
       responses:
         "200":
           description: Tenant.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Tenant" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+    patch:
+      tags: [Organisation]
+      operationId: updateTenant
+      summary: Update profile (only before verification is submitted)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TenantUpdate" }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Tenant" }
+        "400": { $ref: "./common.yaml#/components/responses/BadRequest" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+
+  /tenants/{tenant_id}/departments:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      tags: [Organisation]
+      operationId: listDepartments
+      summary: List departments
+      responses:
+        "200":
+          description: Departments.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Department" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+    post:
+      tags: [Organisation]
+      operationId: createDepartment
+      summary: Create department
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DepartmentInput" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Department" }
+        "400": { $ref: "./common.yaml#/components/responses/BadRequest" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+
+  /tenants/{tenant_id}/departments/{department_id}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: department_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [Organisation]
+      operationId: updateDepartment
+      summary: Rename department
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DepartmentInput" }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Department" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
         "404": { $ref: "./common.yaml#/components/responses/NotFound" }
 
   /tenants/{tenant_id}/agents:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
     get:
       tags: [Organisation]
       operationId: listAgents
       summary: List agents
       parameters:
-        - $ref: "#/components/parameters/TenantId"
         - $ref: "./common.yaml#/components/parameters/Cursor"
         - $ref: "./common.yaml#/components/parameters/Limit"
       responses:
@@ -48,120 +163,69 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required: [items, next_cursor]
                 properties:
                   items:
                     type: array
                     items: { $ref: "#/components/schemas/Agent" }
                   next_cursor: { type: [string, "null"] }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
     post:
       tags: [Organisation]
       operationId: createAgent
       summary: Create agent
-      parameters:
-        - $ref: "#/components/parameters/TenantId"
-        - $ref: "./common.yaml#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/Agent" }
+            schema: { $ref: "#/components/schemas/AgentInput" }
       responses:
         "201":
           description: Created.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Agent" }
-
-  /tenants/{tenant_id}/calling-numbers:
-    post:
-      tags: [Organisation]
-      operationId: addCallingNumber
-      summary: Add calling number for verification
-      parameters:
-        - $ref: "#/components/parameters/TenantId"
-        - $ref: "./common.yaml#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/CallingNumber" }
-      responses:
-        "201":
-          description: Added, status PENDING_VERIFICATION.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/CallingNumber" }
-
-  /review/purpose-codes/{tenant_id}/{code}:
-    post:
-      tags: [Catalogue review]
-      operationId: reviewPurposeCode
-      summary: RingSays reviewer approves or rejects a purpose code
-      parameters:
-        - $ref: "#/components/parameters/TenantId"
-        - name: code
-          in: path
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [decision, reason]
-              properties:
-                decision: { type: string, enum: [APPROVE, REJECT] }
-                reason: { type: string, minLength: 3, maxLength: 500 }
-      responses:
-        "200": { description: Decision recorded. }
+        "400": { $ref: "./common.yaml#/components/responses/BadRequest" }
         "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+        "422": { $ref: "./common.yaml#/components/responses/UnprocessableEntity" }
 
-  /tenants/{tenant_id}/webhook-endpoints:
-    post:
-      tags: [Integration]
-      operationId: createWebhookEndpoint
-      summary: Create webhook endpoint
-      parameters:
-        - $ref: "#/components/parameters/TenantId"
+  /tenants/{tenant_id}/agents/{agent_id}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: agent_id
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [Organisation]
+      operationId: updateAgent
+      summary: Update or deactivate agent
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [url, events]
-              properties:
-                url: { type: string, format: uri, pattern: '^https://' }
-                events:
-                  type: array
-                  minItems: 1
-                  items: { type: string }
-      responses:
-        "201":
-          description: Created; secret shown once.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [endpoint_id, secret]
-                properties:
-                  endpoint_id: { type: string, format: uuid }
-                  secret: { type: string }
-
-  /tenants/{tenant_id}/audit-events:
-    get:
-      tags: [Audit]
-      operationId: listAuditEvents
-      summary: List audit events
-      parameters:
-        - $ref: "#/components/parameters/TenantId"
-        - $ref: "./common.yaml#/components/parameters/Cursor"
-        - $ref: "./common.yaml#/components/parameters/Limit"
+            schema: { $ref: "#/components/schemas/AgentUpdate" }
       responses:
         "200":
-          description: Audit events, newest first.
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+        "422": { $ref: "./common.yaml#/components/responses/UnprocessableEntity" }
+
+  /tenants/{tenant_id}/calling-numbers:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      tags: [Organisation]
+      operationId: listCallingNumbers
+      summary: List calling numbers
+      responses:
+        "200":
+          description: Calling numbers.
           content:
             application/json:
               schema:
@@ -170,8 +234,828 @@ paths:
                 properties:
                   items:
                     type: array
+                    items: { $ref: "#/components/schemas/CallingNumber" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+    post:
+      tags: [Organisation]
+      operationId: addCallingNumber
+      summary: Add calling number for verification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CallingNumberInput" }
+      responses:
+        "201":
+          description: Added, status PENDING_VERIFICATION.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CallingNumber" }
+        "400": { $ref: "./common.yaml#/components/responses/BadRequest" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+        "422": { $ref: "./common.yaml#/components/responses/UnprocessableEntity" }
+
+  /tenants/{tenant_id}/calling-numbers/{number_id}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/NumberId"
+    post:
+      tags: [Organisation]
+      operationId: revokeCallingNumber
+      summary: Stop using a calling number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Reason" }
+      responses:
+        "200":
+          description: Revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CallingNumber" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+
+  # Verification
+
+  /tenants/{tenant_id}/verification:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      tags: [Verification]
+      operationId: getVerification
+      summary: Verification evidence and latest request
+      responses:
+        "200":
+          description: Verification state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Verification" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+
+  /tenants/{tenant_id}/verification/documents:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    post:
+      tags: [Verification]
+      operationId: uploadVerificationDocument
+      summary: Upload evidence (PDF, PNG or JPEG, at most 5 MB)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [kind, file]
+              properties:
+                kind: { $ref: "#/components/schemas/DocumentKind" }
+                reference: { type: string, maxLength: 80 }
+                file: { type: string, contentMediaType: application/octet-stream }
+      responses:
+        "201":
+          description: Stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationDocument" }
+        "400": { $ref: "./common.yaml#/components/responses/BadRequest" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+
+  /tenants/{tenant_id}/verification/documents/{document_id}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/DocumentId"
+    delete:
+      tags: [Verification]
+      operationId: deleteVerificationDocument
+      summary: Remove evidence (not while a request is under review)
+      responses:
+        "204": { description: Removed. }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+
+  /tenants/{tenant_id}/verification/submit:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    post:
+      tags: [Verification]
+      operationId: submitVerification
+      summary: Submit evidence for RingSays review
+      responses:
+        "201":
+          description: Submitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationRequest" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+        "422": { $ref: "./common.yaml#/components/responses/UnprocessableEntity" }
+
+  # Users
+
+  /tenants/{tenant_id}/users:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      tags: [Users]
+      operationId: listPortalUsers
+      summary: List portal users
+      responses:
+        "200":
+          description: Users.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PortalUser" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+    post:
+      tags: [Users]
+      operationId: invitePortalUser
+      summary: Invite a person by email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PortalUserInvite" }
+      responses:
+        "201":
+          description: Invited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PortalUser" }
+        "400": { $ref: "./common.yaml#/components/responses/BadRequest" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+        "422": { $ref: "./common.yaml#/components/responses/UnprocessableEntity" }
+
+  /tenants/{tenant_id}/users/{user_id}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: user_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [Users]
+      operationId: updatePortalUser
+      summary: Change roles, agent link or status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PortalUserUpdate" }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PortalUser" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+        "422": { $ref: "./common.yaml#/components/responses/UnprocessableEntity" }
+
+  # Catalogue
+
+  /tenants/{tenant_id}/purpose-codes:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      tags: [Catalogue]
+      operationId: listTenantPurposeCodes
+      summary: Purpose code catalogue with review state
+      responses:
+        "200":
+          description: Purpose codes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AdminPurposeCode" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+    post:
+      tags: [Catalogue]
+      operationId: proposeTenantPurposeCode
+      summary: Propose a purpose code; enters RingSays review
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "./enterprise.yaml#/components/schemas/PurposeCodeCreate" }
+      responses:
+        "201":
+          description: Proposed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminPurposeCode" }
+        "400": { $ref: "./common.yaml#/components/responses/BadRequest" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+        "422": { $ref: "./common.yaml#/components/responses/UnprocessableEntity" }
+
+  /tenants/{tenant_id}/purpose-codes/{code}/retire:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/Code"
+    post:
+      tags: [Catalogue]
+      operationId: retirePurposeCode
+      summary: Retire a purpose code; new intents can no longer use it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Reason" }
+      responses:
+        "200":
+          description: Retired.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminPurposeCode" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+
+  # Integration
+
+  /tenants/{tenant_id}/api-clients:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      tags: [Integration]
+      operationId: listApiClients
+      summary: List API credentials (secrets never returned)
+      responses:
+        "200":
+          description: Clients.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ApiClient" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+    post:
+      tags: [Integration]
+      operationId: createApiClient
+      summary: Create API credentials; secret shown once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [label, scopes]
+              properties:
+                label: { type: string, minLength: 1, maxLength: 80 }
+                scopes:
+                  type: array
+                  minItems: 1
+                  uniqueItems: true
+                  items: { $ref: "#/components/schemas/Scope" }
+      responses:
+        "201":
+          description: Created.
+          headers:
+            Cache-Control:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiClient"
+                  - type: object
+                    required: [client_secret]
+                    properties:
+                      client_secret: { type: string }
+        "400": { $ref: "./common.yaml#/components/responses/BadRequest" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+
+  /tenants/{tenant_id}/api-clients/{client_id}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: client_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Integration]
+      operationId: revokeApiClient
+      summary: Revoke API credentials (takes effect within 30 seconds)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Reason" }
+      responses:
+        "200":
+          description: Revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiClient" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+
+  /tenants/{tenant_id}/webhook-endpoints:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      tags: [Integration]
+      operationId: listWebhookEndpoints
+      summary: List webhook endpoints
+      responses:
+        "200":
+          description: Endpoints.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/WebhookEndpoint" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+    post:
+      tags: [Integration]
+      operationId: createWebhookEndpoint
+      summary: Create webhook endpoint; signing secret shown once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [url, events]
+              properties:
+                url: { type: string, format: uri, pattern: "^https://", maxLength: 2048 }
+                events:
+                  type: array
+                  minItems: 1
+                  uniqueItems: true
+                  items: { $ref: "#/components/schemas/WebhookEventType" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/WebhookEndpoint"
+                  - type: object
+                    required: [secret]
+                    properties:
+                      secret: { type: string }
+        "400": { $ref: "./common.yaml#/components/responses/BadRequest" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+        "422": { $ref: "./common.yaml#/components/responses/UnprocessableEntity" }
+
+  /tenants/{tenant_id}/webhook-endpoints/{endpoint_id}/disable:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/EndpointId"
+    post:
+      tags: [Integration]
+      operationId: disableWebhookEndpoint
+      summary: Stop sending to an endpoint; queued deliveries are not sent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Reason" }
+      responses:
+        "200":
+          description: Disabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookEndpoint" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+
+  /tenants/{tenant_id}/webhook-endpoints/{endpoint_id}/deliveries:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/EndpointId"
+    get:
+      tags: [Integration]
+      operationId: listWebhookDeliveries
+      summary: Delivery log, newest first
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/WebhookDeliveryStatus" }
+        - $ref: "./common.yaml#/components/parameters/Cursor"
+        - $ref: "./common.yaml#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Deliveries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/WebhookDelivery" }
+                  next_cursor: { type: [string, "null"] }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+
+  /tenants/{tenant_id}/webhook-deliveries/{delivery_id}/replay:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: delivery_id
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags: [Integration]
+      operationId: replayWebhookDelivery
+      summary: Send a delivered or dead webhook again with the same event id
+      responses:
+        "202":
+          description: Queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookDelivery" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+
+  # Monitor
+
+  /tenants/{tenant_id}/intents:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      tags: [Monitor]
+      operationId: monitorIntents
+      summary: Intents, newest first. AGENT role sees only intents it sent.
+      parameters:
+        - name: status
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items: { $ref: "./common.yaml#/components/schemas/IntentStatus" }
+        - name: purpose_code
+          in: query
+          schema: { type: string }
+        - name: agent_id
+          in: query
+          schema: { type: string }
+        - name: phone
+          in: query
+          description: Exact recipient number; matched by keyed hash, never stored in logs.
+          schema: { $ref: "./common.yaml#/components/schemas/E164" }
+        - name: created_from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: created_to
+          in: query
+          schema: { type: string, format: date-time }
+        - $ref: "./common.yaml#/components/parameters/Cursor"
+        - $ref: "./common.yaml#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Intents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/MonitorIntent" }
+                  next_cursor: { type: [string, "null"] }
+        "400": { $ref: "./common.yaml#/components/responses/BadRequest" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+
+  /tenants/{tenant_id}/intents/summary:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      tags: [Monitor]
+      operationId: monitorSummary
+      summary: Counts by status and channel since a time (default last 24 hours)
+      parameters:
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Summary.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MonitorSummary" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+
+  /tenants/{tenant_id}/intents/{intent_id}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: intent_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Monitor]
+      operationId: monitorIntentDetail
+      summary: Intent with status history, delivery attempts and webhooks
+      responses:
+        "200":
+          description: Intent detail.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MonitorIntentDetail" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+
+  # Audit
+
+  /tenants/{tenant_id}/audit-events:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      tags: [Audit]
+      operationId: listAuditEvents
+      summary: List audit events, newest first
+      parameters:
+        - name: action
+          in: query
+          schema: { type: string }
+        - $ref: "./common.yaml#/components/parameters/Cursor"
+        - $ref: "./common.yaml#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Audit events.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
                     items: { $ref: "#/components/schemas/AuditEvent" }
                   next_cursor: { type: [string, "null"] }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+
+  /tenants/{tenant_id}/audit-events/verify:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      tags: [Audit]
+      operationId: verifyAuditChain
+      summary: Recompute the tenant's audit hash chain
+      responses:
+        "200":
+          description: Result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [intact, events_checked, head]
+                properties:
+                  intact: { type: boolean }
+                  events_checked: { type: integer }
+                  head: { type: [string, "null"] }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+
+  /tenants/{tenant_id}/audit-events/export:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      tags: [Audit]
+      operationId: exportAuditEvents
+      summary: Full audit log as CSV, oldest first, with hashes for independent verification
+      responses:
+        "200":
+          description: CSV.
+          content:
+            text/csv:
+              schema: { type: string }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+
+  # Back office
+
+  /backoffice/tenants:
+    get:
+      tags: [Back office]
+      operationId: backofficeListTenants
+      summary: All tenants in this region
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/TenantStatus" }
+      responses:
+        "200":
+          description: Tenants.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Tenant" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+    post:
+      tags: [Back office]
+      operationId: backofficeCreateTenant
+      summary: Onboard an organisation and invite its first administrator (RS_ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TenantCreate" }
+      responses:
+        "201":
+          description: Created with status PENDING.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Tenant" }
+        "400": { $ref: "./common.yaml#/components/responses/BadRequest" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "422": { $ref: "./common.yaml#/components/responses/UnprocessableEntity" }
+
+  /backoffice/tenants/{tenant_id}/suspend:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    post:
+      tags: [Back office]
+      operationId: backofficeSuspendTenant
+      summary: Suspend; API access ends within 30 seconds (RS_ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Reason" }
+      responses:
+        "200":
+          description: Suspended.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Tenant" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+
+  /backoffice/tenants/{tenant_id}/reinstate:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    post:
+      tags: [Back office]
+      operationId: backofficeReinstateTenant
+      summary: Lift a suspension (RS_ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Reason" }
+      responses:
+        "200":
+          description: Reinstated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Tenant" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+
+  /review/queue:
+    get:
+      tags: [Back office]
+      operationId: reviewQueue
+      summary: Items waiting for a RingSays decision, oldest first
+      responses:
+        "200":
+          description: Queue.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReviewQueue" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+
+  /review/verifications/{request_id}:
+    parameters:
+      - name: request_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Back office]
+      operationId: reviewGetVerification
+      summary: Tenant profile and evidence for a verification request
+      responses:
+        "200":
+          description: Request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationReview" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+    post:
+      tags: [Back office]
+      operationId: reviewDecideVerification
+      summary: Approve (tenant becomes VERIFIED) or reject with reason
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Decision" }
+      responses:
+        "200":
+          description: Decision recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationRequest" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+
+  /review/documents/{document_id}/file:
+    parameters:
+      - $ref: "#/components/parameters/DocumentId"
+    get:
+      tags: [Back office]
+      operationId: reviewDownloadDocument
+      summary: Download evidence file
+      responses:
+        "200":
+          description: File.
+          content:
+            application/octet-stream:
+              schema: { type: string, contentMediaType: application/octet-stream }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+
+  /review/purpose-codes/{tenant_id}/{code}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/Code"
+    post:
+      tags: [Back office]
+      operationId: reviewPurposeCode
+      summary: Approve or reject a proposed purpose code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Decision" }
+      responses:
+        "200":
+          description: Decision recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminPurposeCode" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
+
+  /review/calling-numbers/{number_id}:
+    parameters:
+      - $ref: "#/components/parameters/NumberId"
+    post:
+      tags: [Back office]
+      operationId: reviewCallingNumber
+      summary: Approve or reject a calling number after checking operator registration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Decision" }
+      responses:
+        "200":
+          description: Decision recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CallingNumber" }
+        "403": { $ref: "./common.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./common.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./common.yaml#/components/responses/Conflict" }
 
 components:
   securitySchemes:
@@ -185,42 +1069,443 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    NumberId:
+      name: number_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DocumentId:
+      name: document_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    EndpointId:
+      name: endpoint_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Code:
+      name: code
+      in: path
+      required: true
+      schema: { type: string }
 
   schemas:
+    TenantRole:
+      type: string
+      enum: [TENANT_ADMIN, INTEGRATION_ADMIN, SUPERVISOR, AGENT, COMPLIANCE]
+    StaffRole:
+      type: string
+      enum: [RS_REVIEWER, RS_ADMIN]
+    Permission:
+      type: string
+      description: Derived from roles; the portal uses it to show or hide actions. The API enforces it.
+      enum:
+        - org.read
+        - org.manage
+        - users.manage
+        - catalogue.propose
+        - integration.read
+        - integration.manage
+        - intents.read_all
+        - intents.read_own
+        - audit.read
+    TenantStatus:
+      type: string
+      enum: [PENDING, VERIFIED, SUSPENDED]
+    Sector:
+      type: string
+      enum: [BANK, INSURANCE, FINANCE, GOVERNMENT]
+    Scope:
+      type: string
+      enum: [intents:write, intents:read, catalogue:read, catalogue:write]
+
+    Reason:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+
+    Decision:
+      type: object
+      additionalProperties: false
+      required: [decision, reason]
+      properties:
+        decision: { type: string, enum: [APPROVE, REJECT] }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+
+    Me:
+      type: object
+      required: [email, memberships, staff_roles]
+      properties:
+        email: { type: string }
+        display_name: { type: [string, "null"] }
+        memberships:
+          type: array
+          items:
+            type: object
+            required: [tenant_id, legal_name, verification_status, roles, permissions]
+            properties:
+              tenant_id: { type: string, format: uuid }
+              legal_name: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
+              verification_status: { $ref: "#/components/schemas/TenantStatus" }
+              roles:
+                type: array
+                items: { $ref: "#/components/schemas/TenantRole" }
+              permissions:
+                type: array
+                items: { $ref: "#/components/schemas/Permission" }
+              agent_id: { type: [string, "null"] }
+        staff_roles:
+          type: array
+          items: { $ref: "#/components/schemas/StaffRole" }
+
     Tenant:
       type: object
-      required: [tenant_id, legal_name, residency_region, verification_status]
+      required: [tenant_id, legal_name, sector, residency_region, verification_status, created_at]
       properties:
         tenant_id: { type: string, format: uuid }
         legal_name: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
-        commercial_registration: { type: string }
-        domain: { type: string }
+        commercial_registration: { type: [string, "null"] }
+        domain: { type: [string, "null"] }
+        sector: { $ref: "#/components/schemas/Sector" }
         residency_region: { type: string, enum: [KSA, IN, AE, EU] }
-        verification_status: { type: string, enum: [PENDING, VERIFIED, SUSPENDED] }
+        verification_status: { $ref: "#/components/schemas/TenantStatus" }
+        suspended_reason: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+
+    TenantUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        legal_name: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
+        commercial_registration: { type: string, pattern: '^[0-9]{10}$' }
+        domain:
+          type: string
+          maxLength: 253
+          pattern: '^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$'
+
+    TenantCreate:
+      type: object
+      additionalProperties: false
+      required: [legal_name, sector, admin_email]
+      properties:
+        legal_name: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
+        sector: { $ref: "#/components/schemas/Sector" }
+        domain: { type: string, maxLength: 253 }
+        admin_email: { type: string, format: email, maxLength: 254 }
+        admin_name: { type: string, maxLength: 120 }
+
+    Department:
+      type: object
+      required: [department_id, name]
+      properties:
+        department_id: { type: string, format: uuid }
+        name: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
+
+    DepartmentInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
 
     Agent:
       type: object
-      required: [agent_id, display_name, department_id]
+      required: [agent_id, display_name, department_id, active]
       properties:
         agent_id: { type: string }
         display_name: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
         department_id: { type: string, format: uuid }
-        employee_ref: { type: string, description: Tenant internal reference; no personal phone stored. }
-        active: { type: boolean, default: true }
+        employee_ref: { type: [string, "null"], description: Tenant internal reference; no personal phone stored. }
+        active: { type: boolean }
+
+    AgentInput:
+      type: object
+      additionalProperties: false
+      required: [agent_id, display_name, department_id]
+      properties:
+        agent_id: { type: string, pattern: '^[A-Za-z0-9_.-]{3,64}$' }
+        display_name: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
+        department_id: { type: string, format: uuid }
+        employee_ref: { type: string, maxLength: 64 }
+
+    AgentUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        display_name: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
+        department_id: { type: string, format: uuid }
+        employee_ref: { type: [string, "null"], maxLength: 64 }
+        active: { type: boolean }
 
     CallingNumber:
       type: object
-      required: [phone]
+      required: [number_id, phone_masked, status, cst_entity_name_registered, created_at]
       properties:
-        phone: { $ref: "./common.yaml#/components/schemas/E164" }
-        department_id: { type: string, format: uuid }
+        number_id: { type: string, format: uuid }
+        phone_masked: { type: string, description: "Business number with middle digits hidden, for example +9661•••••000." }
+        department_id: { type: [string, "null"], format: uuid }
         status:
           type: string
           enum: [PENDING_VERIFICATION, VERIFIED, REVOKED]
-          readOnly: true
         cst_entity_name_registered:
           type: boolean
           description: Whether number is registered in operator caller name programme.
+        review_reason: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+
+    CallingNumberInput:
+      type: object
+      additionalProperties: false
+      required: [phone, cst_entity_name_registered]
+      properties:
+        phone: { $ref: "./common.yaml#/components/schemas/E164" }
+        department_id: { type: string, format: uuid }
+        cst_entity_name_registered: { type: boolean }
+
+    DocumentKind:
+      type: string
+      enum: [COMMERCIAL_REGISTRATION, REGULATOR_LICENCE, AUTHORISATION_LETTER, DOMAIN_PROOF, OTHER]
+
+    VerificationDocument:
+      type: object
+      required: [document_id, kind, file_name, content_type, size_bytes, sha256, uploaded_at]
+      properties:
+        document_id: { type: string, format: uuid }
+        kind: { $ref: "#/components/schemas/DocumentKind" }
+        reference: { type: [string, "null"] }
+        file_name: { type: string }
+        content_type: { type: string, enum: [application/pdf, image/png, image/jpeg] }
+        size_bytes: { type: integer }
+        sha256: { type: string }
+        uploaded_at: { type: string, format: date-time }
+
+    VerificationRequest:
+      type: object
+      required: [request_id, status, submitted_at]
+      properties:
+        request_id: { type: string, format: uuid }
+        status: { type: string, enum: [SUBMITTED, APPROVED, REJECTED] }
+        submitted_at: { type: string, format: date-time }
+        decided_at: { type: [string, "null"], format: date-time }
+        decision_reason: { type: [string, "null"] }
+
+    Verification:
+      type: object
+      required: [tenant_status, documents, required_kinds, latest_request]
+      properties:
+        tenant_status: { $ref: "#/components/schemas/TenantStatus" }
+        documents:
+          type: array
+          items: { $ref: "#/components/schemas/VerificationDocument" }
+        required_kinds:
+          type: array
+          items: { $ref: "#/components/schemas/DocumentKind" }
+        latest_request:
+          oneOf:
+            - $ref: "#/components/schemas/VerificationRequest"
+            - type: "null"
+
+    VerificationReview:
+      type: object
+      required: [request, tenant, documents]
+      properties:
+        request: { $ref: "#/components/schemas/VerificationRequest" }
+        tenant: { $ref: "#/components/schemas/Tenant" }
+        documents:
+          type: array
+          items: { $ref: "#/components/schemas/VerificationDocument" }
+
+    PortalUser:
+      type: object
+      required: [user_id, email, roles, status, created_at]
+      properties:
+        user_id: { type: string, format: uuid }
+        email: { type: string }
+        display_name: { type: [string, "null"] }
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/TenantRole" }
+        agent_id: { type: [string, "null"] }
+        status: { type: string, enum: [INVITED, ACTIVE, DISABLED] }
+        created_at: { type: string, format: date-time }
+        last_sign_in_at: { type: [string, "null"], format: date-time }
+
+    PortalUserInvite:
+      type: object
+      additionalProperties: false
+      required: [email, roles]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        display_name: { type: string, maxLength: 120 }
+        roles:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/TenantRole" }
+        agent_id: { type: string, description: Required when roles include AGENT. }
+
+    PortalUserUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        roles:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/TenantRole" }
+        agent_id: { type: [string, "null"] }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+
+    AdminPurposeCode:
+      allOf:
+        - $ref: "./enterprise.yaml#/components/schemas/PurposeCode"
+        - type: object
+          properties:
+            proposed_at: { type: [string, "null"], format: date-time }
+            reviewed_at: { type: [string, "null"], format: date-time }
+            review_reason: { type: [string, "null"] }
+
+    ApiClient:
+      type: object
+      required: [client_id, label, scopes, active, created_at]
+      properties:
+        client_id: { type: string }
+        label: { type: string }
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/Scope" }
+        active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        revoked_at: { type: [string, "null"], format: date-time }
+
+    WebhookEventType:
+      type: string
+      enum:
+        - intent.delivered
+        - intent.accepted
+        - intent.rescheduled
+        - intent.scheduled
+        - intent.declined
+        - intent.expired
+        - intent.cancelled
+        - outcome.recorded
+
+    WebhookEndpoint:
+      type: object
+      required: [endpoint_id, url, events, active, created_at]
+      properties:
+        endpoint_id: { type: string, format: uuid }
+        url: { type: string }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/WebhookEventType" }
+        active: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    WebhookDeliveryStatus:
+      type: string
+      enum: [PENDING, SENDING, DELIVERED, DEAD]
+
+    WebhookDelivery:
+      type: object
+      required: [delivery_id, event_id, event_type, intent_id, status, attempts, created_at]
+      properties:
+        delivery_id: { type: integer }
+        endpoint_id: { type: string, format: uuid }
+        event_id: { type: string, format: uuid }
+        event_type: { $ref: "#/components/schemas/WebhookEventType" }
+        intent_id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/WebhookDeliveryStatus" }
+        attempts: { type: integer }
+        next_attempt_at: { type: [string, "null"], format: date-time }
+        last_status_code: { type: [integer, "null"] }
+        last_error: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        delivered_at: { type: [string, "null"], format: date-time }
+
+    MonitorIntent:
+      type: object
+      required:
+        - intent_id
+        - status
+        - to_masked
+        - agent_id
+        - purpose_code
+        - priority
+        - verification_level
+        - valid_from
+        - valid_until
+        - created_at
+        - updated_at
+      properties:
+        intent_id: { type: string, format: uuid }
+        status: { $ref: "./common.yaml#/components/schemas/IntentStatus" }
+        to_masked: { type: string, description: "Recipient with middle digits hidden, for example +9665•••••001." }
+        agent_id: { type: [string, "null"] }
+        department_id: { type: [string, "null"], format: uuid }
+        purpose_code: { type: [string, "null"] }
+        masked_reference: { type: [string, "null"] }
+        priority: { $ref: "./common.yaml#/components/schemas/Priority" }
+        verification_level: { $ref: "./common.yaml#/components/schemas/VerificationLevel" }
+        channel_used:
+          oneOf:
+            - $ref: "./common.yaml#/components/schemas/Channel"
+            - type: "null"
+        valid_from: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+        scheduled_slot:
+          oneOf:
+            - $ref: "./common.yaml#/components/schemas/Slot"
+            - type: "null"
+        decline_reason: { type: [string, "null"] }
+        outcome_code: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    MonitorIntentDetail:
+      allOf:
+        - $ref: "#/components/schemas/MonitorIntent"
+        - type: object
+          required: [events, delivery_attempts, webhooks]
+          properties:
+            proposed_slots:
+              type: array
+              items: { $ref: "./common.yaml#/components/schemas/Slot" }
+            events:
+              type: array
+              items: { $ref: "./common.yaml#/components/schemas/IntentEvent" }
+            delivery_attempts:
+              type: array
+              items:
+                type: object
+                required: [channel, outcome, at]
+                properties:
+                  channel: { type: string }
+                  outcome: { type: string }
+                  reason: { type: [string, "null"] }
+                  at: { type: string, format: date-time }
+            webhooks:
+              type: array
+              items: { $ref: "#/components/schemas/WebhookDelivery" }
+
+    MonitorSummary:
+      type: object
+      required: [since, total, by_status, by_channel]
+      properties:
+        since: { type: string, format: date-time }
+        total: { type: integer }
+        by_status:
+          type: object
+          additionalProperties: { type: integer }
+        by_channel:
+          type: object
+          additionalProperties: { type: integer }
 
     AuditEvent:
       type: object
@@ -235,3 +1520,42 @@ components:
         reason: { type: [string, "null"] }
         hash: { type: string }
         prev_hash: { type: string }
+
+    ReviewQueue:
+      type: object
+      required: [verifications, purpose_codes, calling_numbers]
+      properties:
+        verifications:
+          type: array
+          items:
+            type: object
+            required: [request_id, tenant_id, legal_name, sector, submitted_at]
+            properties:
+              request_id: { type: string, format: uuid }
+              tenant_id: { type: string, format: uuid }
+              legal_name: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
+              sector: { $ref: "#/components/schemas/Sector" }
+              submitted_at: { type: string, format: date-time }
+        purpose_codes:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/AdminPurposeCode"
+              - type: object
+                required: [tenant_id, tenant_name]
+                properties:
+                  tenant_id: { type: string, format: uuid }
+                  tenant_name: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
+        calling_numbers:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/CallingNumber"
+              - type: object
+                required: [tenant_id, tenant_name, phone]
+                properties:
+                  tenant_id: { type: string, format: uuid }
+                  tenant_name: { $ref: "./common.yaml#/components/schemas/LocalisedText" }
+                  phone:
+                    type: string
+                    description: Full business number, shown to reviewers only, to check operator registration.

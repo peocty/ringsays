@@ -7,6 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 LOCAL_JWT_SECRET = "local-development-only-secret-change-me-0123456789"  # noqa: S105
 LOCAL_WEBHOOK_KEY = "bG9jYWwtZGV2LW9ubHktd2ViaG9vay1rZXktMDAwMDA="  # Fernet key, local only
 LOCAL_PHONE_PEPPER = "local-dev-only-pepper"
+DEV_OIDC_ISSUER = "http://127.0.0.1:8000/dev/oidc"
+LOCAL_BACKOFFICE_PASSWORD = "ringsays_backoffice:ringsays_backoffice@"  # noqa: S105
 
 
 class Settings(BaseSettings):
@@ -19,6 +21,12 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://ringsays_app:ringsays_app@127.0.0.1:5432/ringsays"
     # Background jobs connect as ringsays_worker (bypasses row level security; never used by API).
     worker_database_url: str = "postgresql+psycopg://ringsays_worker:ringsays_worker@127.0.0.1:5432/ringsays"
+    # Internal back office deployment only (RingSays reviewers). Tenant facing deployments set
+    # RINGSAYS_BACKOFFICE_ENABLED=false and are not given this credential.
+    backoffice_database_url: str = (
+        "postgresql+psycopg://ringsays_backoffice:ringsays_backoffice@127.0.0.1:5432/ringsays"
+    )
+    backoffice_enabled: bool = True
     # Migrations connect as ringsays_owner.
     migration_database_url: str = "postgresql+psycopg://ringsays_owner:ringsays_owner@127.0.0.1:5432/ringsays"
 
@@ -35,6 +43,28 @@ class Settings(BaseSettings):
     webhook_secret_key: str = LOCAL_WEBHOOK_KEY
     # Keyed hash for phone numbers in Redis counters, so Redis never holds a phone number.
     phone_pepper: str = LOCAL_PHONE_PEPPER
+
+    # Portal and back office sign in (OpenID Connect). Tenant people and RingSays staff may use different
+    # identity providers. JWKS URL None means: discover from issuer. Local uses the built in MOCK issuer.
+    admin_oidc_issuer: str = DEV_OIDC_ISSUER
+    admin_oidc_jwks_url: str | None = None
+    staff_oidc_issuer: str = DEV_OIDC_ISSUER
+    staff_oidc_jwks_url: str | None = None
+    admin_oidc_audience: str = "ringsays-admin-api"
+    dev_oidc_enabled: bool = True
+    portal_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    portal_redirect_uris: list[str] = [
+        "http://localhost:5173/auth/callback",
+        "http://127.0.0.1:5173/auth/callback",
+        "http://localhost:4173/auth/callback",
+        "http://127.0.0.1:4173/auth/callback",
+    ]
+    # Verification evidence. Local: files on disk (MOCK object storage). Production: S3 compatible
+    # storage in region with server side encryption.
+    blob_dir: str = ".local/blobs"
+    api_clients_max_active: int = 10
+    webhook_endpoints_max_active: int = 5
+    invite_ttl_days: int = 14
 
     # Rate limits and contact policy (per tenant defaults; tenant overrides come with admin API).
     tenant_creates_per_minute: int = 600
@@ -55,6 +85,14 @@ class Settings(BaseSettings):
         ]:
             if value == default:
                 raise RuntimeError(f"{name} must be set outside local environment")
+        if self.dev_oidc_enabled:
+            raise RuntimeError(
+                "MOCK sign in (RINGSAYS_DEV_OIDC_ENABLED) is allowed only in local environment"
+            )
+        if DEV_OIDC_ISSUER in (self.admin_oidc_issuer, self.staff_oidc_issuer):
+            raise RuntimeError("RINGSAYS_ADMIN_OIDC_ISSUER and RINGSAYS_STAFF_OIDC_ISSUER must be set")
+        if self.backoffice_enabled and LOCAL_BACKOFFICE_PASSWORD in self.backoffice_database_url:
+            raise RuntimeError("RINGSAYS_BACKOFFICE_DATABASE_URL must be set when back office is enabled")
         if self.environment == "production" and self.use_mock_adapters:
             raise RuntimeError("mock adapters are not allowed in production")
 

@@ -15,7 +15,7 @@ from sqlalchemy import Engine, create_engine, insert, text
 
 from app.core.config import settings
 from app.core.secrets import generate_secret, hash_secret
-from app.core.tables import agents, calling_numbers, departments, purpose_codes, tenants
+from app.core.tables import agents, calling_numbers, departments, portal_users, purpose_codes, tenants
 
 SEED_FILE = Path(__file__).resolve().parents[3] / "contracts/purpose-codes/seed.yaml"
 ALL_SCOPES = ["intents:write", "intents:read", "catalogue:read", "catalogue:write"]
@@ -75,7 +75,7 @@ def seed_tenant(
                 id=uuid4(),
                 tenant_id=tenant_id,
                 department_id=dept_id,
-                phone="+966110000000",
+                phone=f"+96611{tenant_id.int % 10**7:07d}",  # unique per MOCK tenant
                 status="VERIFIED" if verified_number else "PENDING_VERIFICATION",
                 cst_registered=True,
             )
@@ -104,11 +104,71 @@ def seed_tenant(
     return SeededTenant(tenant_id, dept_id, agent_id, client_id, secret)
 
 
+DEMO_PORTAL_USERS = [
+    ("admin@mockbank.example", "Mock Bank Admin", ["TENANT_ADMIN"], None),
+    ("integration@mockbank.example", "Mock Bank Integration", ["INTEGRATION_ADMIN"], None),
+    ("supervisor@mockbank.example", "Mock Bank Supervisor", ["SUPERVISOR"], None),
+    ("agent@mockbank.example", "Mock Bank Agent", ["AGENT"], "agt_demo_01"),
+    ("compliance@mockbank.example", "Mock Bank Compliance", ["COMPLIANCE"], None),
+]
+DEMO_STAFF = [
+    ("reviewer@ringsays.example", "RingSays Reviewer", ["RS_REVIEWER"]),
+    ("ops@ringsays.example", "RingSays Operations", ["RS_ADMIN"]),
+]
+
+
+def invite_portal_user(
+    owner_engine: Engine,
+    tenant_id: UUID,
+    email: str,
+    roles: list[str],
+    *,
+    agent_id: str | None = None,
+    display_name: str | None = None,
+) -> UUID:
+    """Invitation that becomes active on first sign in with this verified email."""
+    user_id = uuid4()
+    with owner_engine.begin() as conn:
+        conn.execute(
+            insert(portal_users).values(
+                id=user_id,
+                tenant_id=tenant_id,
+                email=email.lower(),
+                display_name=display_name,
+                roles=roles,
+                agent_id=agent_id,
+                status="INVITED",
+                invited_by="seed",
+            )
+        )
+    return user_id
+
+
+def seed_staff(owner_engine: Engine, email: str, roles: list[str], display_name: str | None = None) -> UUID:
+    staff_id = uuid4()
+    with owner_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platform.staff_users (id, email, display_name, roles, status) "
+                "VALUES (:i, :e, :n, :r, 'ACTIVE') ON CONFLICT (email) DO NOTHING"
+            ),
+            {"i": staff_id, "e": email.lower(), "n": display_name, "r": roles},
+        )
+    return staff_id
+
+
 def main() -> None:
-    seeded = seed_tenant(create_engine(settings.migration_database_url))
+    engine = create_engine(settings.migration_database_url)
+    seeded = seed_tenant(engine)
+    for email, name, roles, agent in DEMO_PORTAL_USERS:
+        invite_portal_user(engine, seeded.tenant_id, email, roles, agent_id=agent, display_name=name)
+    for email, name, roles in DEMO_STAFF:
+        seed_staff(engine, email, roles, name)
     print(f"MOCK tenant {seeded.tenant_id}")
     print(f"client_id={seeded.client_id}")
     print(f"client_secret={seeded.client_secret}  (shown once)")
+    print("Portal sign in (MOCK issuer): " + ", ".join(e for e, *_ in DEMO_PORTAL_USERS))
+    print("Back office sign in (MOCK issuer): " + ", ".join(e for e, *_ in DEMO_STAFF))
 
 
 if __name__ == "__main__":

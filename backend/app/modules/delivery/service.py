@@ -28,7 +28,7 @@ from uuid import UUID
 from sqlalchemy import Connection, Engine, insert, select, update
 
 from app.core.db import tenant_tx, worker_tx
-from app.core.tables import context_tokens, delivery_attempts, intents
+from app.core.tables import context_tokens, delivery_attempts, intents, tenants
 from app.modules.context import service as context
 from app.modules.intent import repo
 from app.modules.intent import service as intent_service
@@ -42,7 +42,8 @@ log = logging.getLogger(__name__)
 SDK_GRACE = timedelta(minutes=2)
 PUSH_LEASE = timedelta(seconds=60)
 ERROR_BACKOFF = timedelta(minutes=5)
-DEFAULT_CATEGORY = "BANK"  # BFSI launch tenants; tenant sector field comes with admin API
+# Receiver rule category for each tenant sector (preferences group banks, insurers and finance together).
+SECTOR_CATEGORY = {"BANK": "BANK", "INSURANCE": "BANK", "FINANCE": "BANK", "GOVERNMENT": "GOVERNMENT"}
 
 
 @dataclass
@@ -114,10 +115,13 @@ def _token_resolved(conn: Connection, intent_id: UUID) -> bool:
     )
 
 
-def _context(intent: Intent) -> IncomingContext:
-    return IncomingContext(
-        DEFAULT_CATEGORY, intent.verification_level, intent.priority, intent.expected_duration_min
-    )
+def _category(conn: Connection, tenant_id: UUID | None) -> str:
+    sector = conn.execute(select(tenants.c.sector).where(tenants.c.id == tenant_id)).scalar_one_or_none()
+    return SECTOR_CATEGORY.get(sector or "BANK", "BANK")
+
+
+def _context(intent: Intent, category: str) -> IncomingContext:
+    return IncomingContext(category, intent.verification_level, intent.priority, intent.expected_duration_min)
 
 
 def deliver_due(
@@ -231,7 +235,7 @@ def _plan(conn: Connection, intent_id: UUID, now: datetime, directory: Recipient
     if recipient is not None and recipient.blocked:
         decision = Decision.BLOCK
     elif recipient is not None:
-        outcome = evaluate(recipient.preferences, _context(intent), now)
+        outcome = evaluate(recipient.preferences, _context(intent, _category(conn, intent.tenant_id)), now)
         decision = outcome.decision
         if decision is Decision.HOLD_UNTIL_WINDOW and outcome.hold_until is not None:
             if outcome.hold_until < intent.valid_until:
@@ -337,6 +341,7 @@ def precall_push_after_commit(
     """
     with tenant_tx(tenant_id) as conn:
         intent, _ = repo.load(conn, intent_id)
+        category = _category(conn, tenant_id)
     if intent.status is not IntentStatus.IN_PROGRESS or intent.to_phone is None:
         return False
     if intent.channel_used not in (Channel.SDK, Channel.PRECALL_PUSH):
@@ -347,7 +352,7 @@ def precall_push_after_commit(
     decision = (
         Decision.BLOCK
         if recipient.blocked
-        else evaluate(recipient.preferences, _context(intent), now).decision
+        else evaluate(recipient.preferences, _context(intent, category), now).decision
     )
     if decision is not Decision.ALLOW:
         with tenant_tx(tenant_id) as conn:

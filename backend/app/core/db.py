@@ -33,6 +33,13 @@ def get_worker_engine(url: str | None = None) -> Engine:
     )
 
 
+@lru_cache(maxsize=4)
+def get_backoffice_engine(url: str | None = None) -> Engine:
+    return create_engine(
+        url or settings.backoffice_database_url, pool_pre_ping=True, pool_size=4, hide_parameters=True
+    )
+
+
 @contextmanager
 def tenant_tx(tenant_id: UUID, engine: Engine | None = None) -> Iterator[Connection]:
     eng = engine or get_engine()
@@ -71,5 +78,16 @@ def anonymous_tx(engine: Engine | None = None) -> Iterator[Connection]:
 @contextmanager
 def worker_tx(engine: Engine | None = None) -> Iterator[Connection]:
     eng = engine or get_worker_engine()
+    with eng.begin() as conn:
+        yield conn
+
+
+@contextmanager
+def backoffice_tx(engine: Engine | None = None) -> Iterator[Connection]:
+    """Back office role: reads organisation, catalogue and verification rows across tenants (never intents
+    or identity). Only the internal back office deployment has this credential."""
+    if not settings.backoffice_enabled:
+        raise RuntimeError("back office is not enabled in this deployment")
+    eng = engine or get_backoffice_engine()
     with eng.begin() as conn:
         yield conn
