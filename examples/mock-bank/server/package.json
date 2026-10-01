@@ -1,0 +1,23 @@
+{
+  "name": "@mockbank/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mock Bank backend (fictional): calls the RingSays enterprise API, receives webhooks, serves the agent console and the bank app API.",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --env-file-if-exists=.env.local dist/main.js",
+    "setup": "node scripts/setup.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "fastify": "5.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "5.8.3",
+    "vitest": "3.2.4"
+  }
+}

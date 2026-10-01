@@ -2,3 +2,4 @@ packages:
   - "packages/*"
   - "apps/*"
   - "sdk/react-native"
+  - "examples/mock-bank/*"

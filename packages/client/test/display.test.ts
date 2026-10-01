@@ -1,3 +1,6 @@
+// Times in these tests are read on a UTC clock unless a test sets its own zone.
+process.env.TZ = "UTC";
+
 import { headline, isVerifiedOrganisation, minutesLeft, openSlots, suggestedSlots, type IntentDisplay } from "../src";
 
 const base: IntentDisplay = {
@@ -45,10 +48,36 @@ describe("display rules", () => {
   });
 
   it("suggested slots start at least an hour ahead on the quarter hour", () => {
-    const now = Date.parse("2026-10-04T07:07:00Z");
+    const now = Date.parse("2026-10-04T10:07:00Z");
     const s = suggestedSlots(10, now);
-    expect(s[0]!.start).toBe("2026-10-04T08:15:00.000Z");
-    expect(s[0]!.end).toBe("2026-10-04T08:25:00.000Z");
+    expect(s[0]!.start).toBe("2026-10-04T11:15:00.000Z");
+    expect(s[0]!.end).toBe("2026-10-04T11:25:00.000Z");
     expect(s).toHaveLength(3);
+  });
+});
+
+describe("suggested times stay in working hours (phone's time zone)", () => {
+  const tz = process.env.TZ;
+  beforeAll(() => {
+    process.env.TZ = "Asia/Riyadh";
+  });
+  afterAll(() => {
+    process.env.TZ = tz;
+  });
+  const hour = (iso: string) => new Date(iso).getHours();
+
+  it("late evening: next morning from 09:00", () => {
+    const s = suggestedSlots(5, Date.parse("2026-10-01T23:49:00+03:00"));
+    expect(s.map((x) => hour(x.start))).toEqual([9, 11, 13]);
+    expect(new Date(s[0]!.start).getDate()).toBe(2);
+  });
+
+  it("afternoon: rolls past 20:00 to the next morning", () => {
+    const s = suggestedSlots(5, Date.parse("2026-10-01T16:10:00+03:00"));
+    expect(s.map((x) => hour(x.start))).toEqual([17, 19, 9]);
+  });
+
+  it("early morning: starts at 09:00", () => {
+    expect(hour(suggestedSlots(5, Date.parse("2026-10-01T05:00:00+03:00"))[0]!.start)).toBe(9);
   });
 });

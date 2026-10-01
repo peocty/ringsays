@@ -1,0 +1,46 @@
+{
+  "name": "@mockbank/app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mock Bank customer app (fictional bank): shows RingSays requests with the enterprise SDK.",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "web": "expo start --web --port 8082",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "export:web": "expo export --platform web --output-dir dist",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@ringsays/react-native-sdk": "workspace:*",
+    "expo": "57.0.26",
+    "expo-crypto": "~57.0.3",
+    "expo-secure-store": "~57.0.4",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-web": "~0.21.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.0",
+    "@react-native/jest-preset": "0.86.3",
+    "@testing-library/react-native": "13.3.3",
+    "@types/jest": "29.5.14",
+    "@types/react": "~19.2.18",
+    "jest": "29.7.0",
+    "jest-expo": "~57.0.5",
+    "typescript": "5.8.3"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "testMatch": [
+      "<rootDir>/test/**/*.test.ts?(x)"
+    ],
+    "transformIgnorePatterns": [
+      "node_modules/(?!(?:.pnpm/)?((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@ringsays|@noble|openapi-fetch))"
+    ]
+  }
+}

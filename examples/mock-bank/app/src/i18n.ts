@@ -1,0 +1,68 @@
+export type Lang = "en" | "ar";
+
+export const text = {
+  en: {
+    bank: "Mock Bank",
+    demo: "Fictional bank · demo",
+    signIn: "Sign in",
+    customer: "Customer",
+    pin: "PIN",
+    pinHint: "Demo PIN: 2468",
+    signOut: "Sign out",
+    hello: "Hello, {name}",
+    fromBank: "Call requests from Mock Bank",
+    fromBankHint: "Verified by RingSays. Answer here; no one will call you without your choice.",
+    nothing: "No call requests right now.",
+    history: "Earlier",
+    switch: "العربية",
+    error: "Could not reach Mock Bank. Pull to try again.",
+    status: {
+      REQUESTED: "Waiting",
+      DELIVERED: "Waiting for your answer",
+      ACCEPTED: "You agreed to talk now",
+      RESCHEDULED: "You suggested other times",
+      SCHEDULED: "Call scheduled",
+      IN_PROGRESS: "Call in progress",
+      FOLLOW_UP_REQUIRED: "Follow up planned",
+      COMPLETED: "Completed",
+      DECLINED: "Declined",
+      EXPIRED: "Ended",
+      CANCELLED: "Withdrawn by the bank",
+    } as Record<string, string>,
+    scheduledFor: "Scheduled: {time}",
+  },
+  ar: {
+    bank: "بنك تجريبي",
+    demo: "بنك وهمي · للعرض",
+    signIn: "تسجيل الدخول",
+    customer: "العميل",
+    pin: "الرقم السري",
+    pinHint: "الرقم السري للعرض: 2468",
+    signOut: "تسجيل الخروج",
+    hello: "مرحبًا، {name}",
+    fromBank: "طلبات اتصال من البنك التجريبي",
+    fromBankHint: "موثّقة من رينغ سيز. أجب هنا؛ لن يتصل بك أحد دون اختيارك.",
+    nothing: "لا توجد طلبات اتصال حاليًا.",
+    history: "السابقة",
+    switch: "English",
+    error: "تعذّر الوصول إلى البنك. اسحب للمحاولة مرة أخرى.",
+    status: {
+      REQUESTED: "بانتظار الإرسال",
+      DELIVERED: "بانتظار ردك",
+      ACCEPTED: "وافقت على التحدث الآن",
+      RESCHEDULED: "اقترحت أوقاتًا أخرى",
+      SCHEDULED: "تمت جدولة المكالمة",
+      IN_PROGRESS: "المكالمة جارية",
+      FOLLOW_UP_REQUIRED: "متابعة مخططة",
+      COMPLETED: "اكتمل",
+      DECLINED: "مرفوض",
+      EXPIRED: "انتهى",
+      CANCELLED: "سحبه البنك",
+    } as Record<string, string>,
+    scheduledFor: "الموعد: {time}",
+  },
+} as const;
+
+export function fill(t: string, vars: Record<string, string>): string {
+  return t.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? "");
+}

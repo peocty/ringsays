@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mock Bank · Agent console</title>
+  <link rel="stylesheet" href="/console/console.css">
+  <script src="/console/console.js" defer></script>
+</head>
+<body>
+  <header class="bar">
+    <div class="brand"><span class="mark" aria-hidden="true">MB</span> Mock Bank <span class="muted">agent console</span></div>
+    <div class="demo">Fictional bank · RingSays local MOCK environment</div>
+    <button id="logout" class="ghost" hidden>Sign out</button>
+  </header>
+
+  <main>
+    <section id="login" class="card narrow" hidden>
+      <h1>Sign in</h1>
+      <form id="login-form">
+        <label for="password">Console password</label>
+        <input id="password" type="password" autocomplete="current-password" required>
+        <button type="submit">Sign in</button>
+        <p id="login-error" class="error" role="alert"></p>
+      </form>
+    </section>
+
+    <div id="work" class="grid" hidden>
+      <section class="card">
+        <h2>Ask a customer for a call</h2>
+        <form id="new-intent">
+          <label for="customer">Customer</label>
+          <select id="customer" required></select>
+
+          <label for="purpose">Reason (approved purpose)</label>
+          <select id="purpose" required></select>
+          <p id="purpose-text" class="muted small"></p>
+
+          <div class="row">
+            <div>
+              <label for="priority">Priority</label>
+              <select id="priority"></select>
+            </div>
+            <div>
+              <label for="duration">Minutes</label>
+              <input id="duration" type="number" min="1" value="5" required>
+            </div>
+            <div>
+              <label for="reference">Reference (last 4)</label>
+              <input id="reference" maxlength="4" pattern="[A-Za-z0-9]{3,4}" placeholder="4821">
+            </div>
+          </div>
+
+          <fieldset>
+            <legend>Offer times (optional, customer can pick one)</legend>
+            <div id="slots" class="chips"></div>
+          </fieldset>
+
+          <button type="submit" id="send">Send request</button>
+          <p id="send-error" class="error" role="alert"></p>
+        </form>
+      </section>
+
+      <section class="card wide">
+        <div class="head">
+          <h2>Requests</h2>
+          <span class="muted small" id="updated"></span>
+        </div>
+        <table>
+          <thead><tr><th>Customer</th><th>Reason</th><th>Status</th><th>Time</th><th>Actions</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <p id="empty" class="muted">No requests yet.</p>
+        <p id="action-error" class="error" role="alert"></p>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

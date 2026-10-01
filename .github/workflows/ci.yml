@@ -95,6 +95,15 @@ jobs:
           EXPO_PUBLIC_RINGSAYS_PREVIEW_PUSH_TOKEN: mock-web
       - run: pnpm --filter @ringsays/mobile e2e
         env: { E2E_PYTHON: "${{ github.workspace }}/backend/.venv/bin/python" }
+      - name: Mock bank (SDK sample) server and app web build
+        run: |
+          pnpm --filter @ringsays/react-native-sdk build
+          pnpm --filter @mockbank/server build
+          pnpm --filter @mockbank/app export:web
+      - run: pnpm --filter @mockbank/app e2e
+        env:
+          E2E_PYTHON: "${{ github.workspace }}/backend/.venv/bin/python"
+          RINGSAYS_PYTHON: "${{ github.workspace }}/backend/.venv/bin/python"
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -102,6 +111,7 @@ jobs:
           path: |
             apps/portal/test-results
             apps/mobile/test-results
+            examples/mock-bank/app/test-results
             api.log
 
   security:

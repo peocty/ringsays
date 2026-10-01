@@ -32,20 +32,30 @@ export function openSlots(i: Pick<IntentDisplay, "proposed_slots">, now = Date.n
     .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
 }
 
+/** Hours (on the phone's clock, which is the customer's time zone) a suggested call may start. */
+export const SUGGEST_FROM_HOUR = 9;
+export const SUGGEST_UNTIL_HOUR = 20;
+
 /**
- * Up to three alternative times the receiver can propose: next two working hours later today or
- * tomorrow morning, each as long as the expected call. Times are aligned to the quarter hour.
+ * Up to three alternative times the receiver can propose, at least an hour from now and two hours
+ * apart, each starting between 09:00 and 20:00 local time (outside that, the next morning at 09:00).
+ * Each is as long as the expected call; times are aligned to the quarter hour.
  */
 export function suggestedSlots(durationMin: number, now = Date.now(), count = 3): Slot[] {
   const quarter = 15 * 60_000;
-  let start = Math.ceil((now + 60 * 60_000) / quarter) * quarter;
+  const length = Math.max(durationMin, 5) * 60_000;
+  const inHours = (t: number): number => {
+    const d = new Date(t);
+    if (d.getHours() >= SUGGEST_FROM_HOUR && d.getHours() < SUGGEST_UNTIL_HOUR) return t;
+    if (d.getHours() >= SUGGEST_UNTIL_HOUR) d.setDate(d.getDate() + 1);
+    d.setHours(SUGGEST_FROM_HOUR, 0, 0, 0);
+    return d.getTime();
+  };
+  let start = inHours(Math.ceil((now + 60 * 60_000) / quarter) * quarter);
   const out: Slot[] = [];
   for (let i = 0; i < count; i += 1) {
-    out.push({
-      start: new Date(start).toISOString(),
-      end: new Date(start + Math.max(durationMin, 5) * 60_000).toISOString(),
-    });
-    start += 2 * 60 * 60_000;
+    out.push({ start: new Date(start).toISOString(), end: new Date(start + length).toISOString() });
+    start = inHours(start + 2 * 60 * 60_000);
   }
   return out;
 }

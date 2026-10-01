@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "Mock Bank",
+    "slug": "mock-bank",
+    "scheme": "mockbank",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": { "bundleIdentifier": "example.mockbank.app", "supportsTablet": false },
+    "android": { "package": "example.mockbank.app", "allowBackup": false },
+    "web": { "output": "single", "bundler": "metro" },
+    "plugins": ["expo-secure-store"]
+  }
+}

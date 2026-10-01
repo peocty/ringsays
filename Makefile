@@ -1,4 +1,4 @@
-.PHONY: setup check contracts backend ts up down migrate seed api portal mobile mobile-web e2e e2e-mobile
+.PHONY: bank-setup bank bank-app e2e-bank setup check contracts backend ts up down migrate seed api portal mobile mobile-web e2e e2e-mobile
 
 setup:
 	pnpm install
@@ -45,3 +45,16 @@ migrate:
 
 seed:
 	cd backend && RINGSAYS_ENVIRONMENT=local .venv/bin/python -m app.scripts.seed
+
+# Mock Bank (fictional bank using the SDK). Needs `make api` and a worker (cd backend && .venv/bin/python -m app.worker).
+bank-setup:
+	pnpm --filter @ringsays/react-native-sdk build && pnpm --filter @mockbank/server build && pnpm --filter @mockbank/server setup
+
+bank:
+	pnpm --filter @mockbank/server start
+
+bank-app:
+	pnpm --filter @ringsays/react-native-sdk build && pnpm --filter @mockbank/app web
+
+e2e-bank:
+	pnpm --filter @ringsays/react-native-sdk build && pnpm --filter @mockbank/server build && pnpm --filter @mockbank/app export:web && pnpm --filter @mockbank/app e2e

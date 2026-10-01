@@ -28,3 +28,7 @@ apps/mobile/e2e/.seed.json
 apps/mobile/dist/
 apps/mobile/test-results/
 dump.rdb
+examples/mock-bank/app/dist/
+examples/mock-bank/app/test-results/
+examples/mock-bank/server/.env.local
+examples/mock-bank/server/data/
