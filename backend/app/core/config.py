@@ -52,7 +52,12 @@ class Settings(BaseSettings):
     staff_oidc_jwks_url: str | None = None
     admin_oidc_audience: str = "ringsays-admin-api"
     dev_oidc_enabled: bool = True
-    portal_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    portal_origins: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+    ]
     portal_redirect_uris: list[str] = [
         "http://localhost:5173/auth/callback",
         "http://127.0.0.1:5173/auth/callback",

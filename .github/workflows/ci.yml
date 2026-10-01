@@ -50,6 +50,47 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
+      - name: Portal API types match admin contract
+        run: pnpm --filter @ringsays/portal check:api-types
+
+  portal-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+    env:
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - name: Database roles and schema
+        run: |
+          psql -h 127.0.0.1 -U postgres -f infra/sql/00-roles.sql
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE ringsays OWNER ringsays_owner"
+          cd backend && python -m venv .venv && .venv/bin/pip install -e ".[dev]" && .venv/bin/alembic upgrade head
+      - name: Start API (local environment, MOCK sign in)
+        run: cd backend && nohup .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 > ../api.log 2>&1 &
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ringsays/portal build
+      - run: pnpm --filter @ringsays/portal exec playwright install --with-deps chromium
+      - run: pnpm --filter @ringsays/portal e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-e2e
+          path: |
+            apps/portal/test-results
+            api.log
 
   security:
     runs-on: ubuntu-latest

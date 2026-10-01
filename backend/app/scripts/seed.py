@@ -157,13 +157,47 @@ def seed_staff(owner_engine: Engine, email: str, roles: list[str], display_name:
     return staff_id
 
 
+def _tagged(email: str, tag: str | None) -> str:
+    if not tag:
+        return email
+    local, domain = email.split("@", 1)
+    return f"{local}+{tag}@{domain}"
+
+
 def main() -> None:
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(description="Seed MOCK demo data (local only).")
+    parser.add_argument("--tag", help="Add +tag to every demo email, for an isolated run (browser tests)")
+    parser.add_argument("--json", action="store_true", help="Print result as JSON")
+    args = parser.parse_args()
+    if settings.environment != "local":
+        raise SystemExit("seed is for local development only")
     engine = create_engine(settings.migration_database_url)
     seeded = seed_tenant(engine)
+    people = {}
     for email, name, roles, agent in DEMO_PORTAL_USERS:
-        invite_portal_user(engine, seeded.tenant_id, email, roles, agent_id=agent, display_name=name)
+        tagged = _tagged(email, args.tag)
+        invite_portal_user(engine, seeded.tenant_id, tagged, roles, agent_id=agent, display_name=name)
+        people[roles[0]] = tagged
     for email, name, roles in DEMO_STAFF:
-        seed_staff(engine, email, roles, name)
+        tagged = _tagged(email, args.tag)
+        seed_staff(engine, tagged, roles, name)
+        people[roles[0]] = tagged
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "tenant_id": str(seeded.tenant_id),
+                    "client_id": seeded.client_id,
+                    "client_secret": seeded.client_secret,
+                    "agent_id": seeded.agent_id,
+                    "people": people,
+                }
+            )
+        )
+        return
     print(f"MOCK tenant {seeded.tenant_id}")
     print(f"client_id={seeded.client_id}")
     print(f"client_secret={seeded.client_secret}  (shown once)")

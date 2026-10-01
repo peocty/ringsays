@@ -14,7 +14,10 @@ from app.core.config import DEV_OIDC_ISSUER, settings
 from . import issuer
 
 router = APIRouter(prefix="/dev/oidc", tags=["MOCK sign in"], include_in_schema=False)
-_CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"
+def _csp() -> str:
+    # form-action also governs where the form's redirect may go, so allow the portal origins.
+    origins = " ".join(sorted({f"{u.scheme}://{u.netloc}" for u in map(urlsplit, settings.portal_redirect_uris)}))
+    return f"default-src 'none'; style-src 'unsafe-inline'; form-action 'self' {origins}; frame-ancestors 'none'"
 
 
 @router.get("/.well-known/openid-configuration")
@@ -42,7 +45,7 @@ def jwks() -> dict[str, object]:
 
 def _error_page(message: str, status: int = 400) -> HTMLResponse:
     body = f"<!doctype html><title>MOCK sign in</title><p>{html.escape(message)}</p>"
-    return HTMLResponse(body, status_code=status, headers={"Content-Security-Policy": _CSP})
+    return HTMLResponse(body, status_code=status, headers={"Content-Security-Policy": _csp()})
 
 
 @router.get("/authorize")
@@ -95,7 +98,7 @@ border:1px solid #ccd3e0;border-radius:8px;font:inherit}}
 <input type="email" name="other_email" placeholder="name@example.com">
 <button name="email" value="">Sign in with this email</button>
 </form></body></html>"""
-    return HTMLResponse(page, headers={"Content-Security-Policy": _CSP, "Cache-Control": "no-store"})
+    return HTMLResponse(page, headers={"Content-Security-Policy": _csp(), "Cache-Control": "no-store"})
 
 
 @router.post("/authorize", response_model=None)

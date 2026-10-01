@@ -21,3 +21,6 @@ __pycache__/
 .idea/
 .vscode/
 .local/
+apps/portal/e2e/.seed.json
+apps/portal/test-results/
+apps/portal/playwright-report/
