@@ -105,7 +105,7 @@ TypeScript workspace tests, portal 12, app 6 and Mock Bank 4 browser tests, depl
 
 | Step | Owner | Notes |
 | --- | --- | --- |
-| Push the repository to GitHub, enable the CI and release workflows | PEOCIT | Repository name goes into OpenTofu (`github_repository`) |
+| Repository on GitHub (`Peocty/ringsays`, private); CI runs on every push | Done 2026-10-02 | Same name, same case, in OpenTofu `github_repository` |
 | Google Cloud organisation prerequisites, Assured Workloads KSA folder | PEOCIT cloud admin | `deploy/README.md` "Prerequisites" |
 | Apply staging, release, run the verification checklist | Platform team | Staging runs MOCK providers |
 | CST sender name, Taqnyat or Unifonic account | PEOCIT | Weeks of lead time; start now |
