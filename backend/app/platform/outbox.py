@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 
 
 class Publisher(Protocol):
-    def publish(self, subject: str, payload: bytes) -> None: ...
+    def publish(self, subject: str, payload: bytes, msg_id: str | None = None) -> None: ...
 
 
 @dataclass
@@ -38,35 +38,67 @@ class MockPublisher:
     published: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     fail_subjects: set[str] = field(default_factory=set)
 
-    def publish(self, subject: str, payload: bytes) -> None:
+    def publish(self, subject: str, payload: bytes, msg_id: str | None = None) -> None:
         if subject in self.fail_subjects:
             raise ConnectionError(f"MockPublisher configured to fail for {subject}")
         self.published.append((subject, json.loads(payload)))
 
 
+STREAM = "RINGSAYS_EVENTS"
+STREAM_SUBJECTS = ["ringsays.>"]
+
+
 class NatsPublisher:
     """NATS JetStream publisher holding one connection for its lifetime.
 
-    Written against nats-py; not exercised in Claude's build workspace (no NATS server available).
+    On first connect it makes sure the events stream exists (file storage, bounded age, deduplication
+    window), creating or updating it, so a fresh server works without manual setup. Each event carries
+    its outbox id as `Nats-Msg-Id`: a relay retry after a lost acknowledgement is dropped by the server
+    instead of published twice. Tested against a real nats-server (tests/test_nats_publisher.py).
     """
 
-    def __init__(self, url: str, timeout_s: float = 5.0) -> None:
+    def __init__(
+        self, url: str, timeout_s: float = 5.0, replicas: int = 1, max_age_s: int = 7 * 86400
+    ) -> None:
         self._url = url
         self._timeout = timeout_s
+        self._replicas = replicas
+        self._max_age_s = max_age_s
         self._loop = asyncio.new_event_loop()
         self._nc: Any = None
         self._js: Any = None
 
+    async def _connect(self) -> None:
+        import nats
+        from nats.js.api import DiscardPolicy, RetentionPolicy, StorageType, StreamConfig
+        from nats.js.errors import NotFoundError
+
+        self._nc = await nats.connect(self._url, connect_timeout=self._timeout)
+        self._js = self._nc.jetstream(timeout=self._timeout)
+        config = StreamConfig(
+            name=STREAM,
+            subjects=STREAM_SUBJECTS,
+            retention=RetentionPolicy.LIMITS,
+            storage=StorageType.FILE,
+            discard=DiscardPolicy.OLD,
+            max_age=float(self._max_age_s),
+            num_replicas=self._replicas,
+            duplicate_window=float(15 * 60),
+        )
+        try:
+            await self._js.stream_info(STREAM)
+            await self._js.update_stream(config)
+        except NotFoundError:
+            await self._js.add_stream(config)
+
     def _ensure(self) -> None:
         if self._nc is None or self._nc.is_closed:
-            import nats
+            self._loop.run_until_complete(self._connect())
 
-            self._nc = self._loop.run_until_complete(nats.connect(self._url, connect_timeout=self._timeout))
-            self._js = self._nc.jetstream(timeout=self._timeout)
-
-    def publish(self, subject: str, payload: bytes) -> None:
+    def publish(self, subject: str, payload: bytes, msg_id: str | None = None) -> None:
         self._ensure()
-        self._loop.run_until_complete(self._js.publish(subject, payload))
+        headers = {"Nats-Msg-Id": msg_id} if msg_id else None
+        self._loop.run_until_complete(self._js.publish(subject, payload, headers=headers))
 
     def close(self) -> None:
         if self._nc is not None and not self._nc.is_closed:
@@ -114,7 +146,7 @@ def relay_once(conn: Connection, publisher: Publisher, now: datetime, batch: int
     sent = 0
     for row in rows:
         try:
-            publisher.publish(row.subject, json.dumps(row.payload).encode())
+            publisher.publish(row.subject, json.dumps(row.payload).encode(), msg_id=str(row.id))
         except Exception as exc:
             attempts = row.attempts + 1
             dead = attempts >= MAX_ATTEMPTS

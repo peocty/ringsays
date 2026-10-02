@@ -12,6 +12,7 @@ import signal
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 
 from app.core.config import settings
 from app.core.db import worker_tx
@@ -68,6 +69,16 @@ def tick(now: datetime, publisher: outbox.Publisher, sender: webhooks.HttpSender
     return result
 
 
+def heartbeat() -> None:
+    """Liveness signal for the orchestrator: written after every finished pass. A pass stuck on a
+    hung connection stops it, so the pod is restarted."""
+    if settings.worker_heartbeat_file:
+        try:
+            Path(settings.worker_heartbeat_file).touch()
+        except OSError as exc:
+            log.warning("heartbeat not written: %s", type(exc).__name__)
+
+
 def main() -> None:
     import argparse
 
@@ -85,7 +96,11 @@ def main() -> None:
             log.warning("webhooks to this machine (127.0.0.1, localhost) are really sent; others MOCK")
             sender = webhooks.LoopbackHttpSender(sender)
     else:
-        publisher = outbox.NatsPublisher(settings.nats_url)
+        publisher = outbox.NatsPublisher(
+            settings.nats_url,
+            replicas=settings.nats_stream_replicas,
+            max_age_s=settings.nats_stream_max_age_days * 86400,
+        )
         sender = webhooks.HttpxSender()
     if args.once:
         import json
@@ -102,6 +117,7 @@ def main() -> None:
                 log.info("tick %s", result)
         except Exception as exc:  # keep worker alive; next tick retries
             log.error("tick failed: %s", type(exc).__name__)
+        heartbeat()
         time.sleep(max(0.0, TICK_S - (time.monotonic() - started)))
 
 

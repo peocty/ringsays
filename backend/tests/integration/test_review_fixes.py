@@ -126,7 +126,7 @@ def test_relay_stops_at_first_failure_preserving_order(
         def __init__(self) -> None:
             self.sent: list[int] = []
 
-        def publish(self, subject: str, payload: bytes) -> None:
+        def publish(self, subject: str, payload: bytes, msg_id: str | None = None) -> None:
             raise ConnectionError("broker down")
 
     with worker_tx() as conn:
@@ -155,7 +155,7 @@ def test_dead_letter_after_max_attempts(client: TestClient, tenant: SeededTenant
         def __init__(self) -> None:
             self.calls = 0
 
-        def publish(self, s: str, payload: bytes) -> None:
+        def publish(self, s: str, payload: bytes, msg_id: str | None = None) -> None:
             self.calls += 1
             if self.calls == 1:
                 raise ConnectionError("poison message")

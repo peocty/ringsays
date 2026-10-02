@@ -34,6 +34,8 @@ class Settings(BaseSettings):
 
     redis_url: str = "redis://127.0.0.1:6379/0"
     nats_url: str = "nats://127.0.0.1:4222"
+    nats_stream_replicas: int = 1  # 3 on a three node production cluster
+    nats_stream_max_age_days: int = 7
     use_mock_adapters: bool = True
 
     # Local tokens use HS256 with a static secret. Production must use an asymmetric key held in KMS.
@@ -77,6 +79,8 @@ class Settings(BaseSettings):
         "http://localhost:4173/auth/callback",
         "http://127.0.0.1:4173/auth/callback",
     ]
+    # Worker liveness file, touched after every pass (Kubernetes liveness probe reads its age).
+    worker_heartbeat_file: str | None = "/tmp/worker-alive"  # noqa: S108
     # CIDRs of load balancer proxies whose X-Forwarded-For is believed (GKE: the proxy only subnet).
     trusted_proxies: list[str] = []
     # Verification evidence. Local: files on disk (MOCK object storage). Production: S3 compatible
