@@ -26,8 +26,15 @@ fi
 
 kubeconform -strict -summary -kubernetes-version "$k8s_version" \
   -schema-location default -schema-location "$crds" "$out"/*.yaml
-kube-linter lint "$out"/*.yaml
-checkov --config-file "$here/.checkov.yaml" -d "$out" --framework kubernetes --compact --quiet
-checkov --config-file "$here/.checkov.yaml" -d "$here/terraform" --framework terraform --compact --quiet
+# One environment at a time: objects share names across overlays.
+# Jobs are applied into an environment that already has their service account (base).
+for f in "$out"/*.yaml; do
+  case "$(basename "$f")" in
+    job-*) kube-linter lint --exclude non-existent-service-account "$f" ;;
+    *) kube-linter lint "$f" ;;
+  esac
+done
+checkov --skip-download --config-file "$here/.checkov.yaml" -d "$out" --framework kubernetes --compact --quiet
+checkov --skip-download --config-file "$here/.checkov.yaml" -d "$here/terraform" --framework terraform --compact --quiet
 tofu fmt -check -recursive "$here/terraform"
 echo "deploy: all checks passed"

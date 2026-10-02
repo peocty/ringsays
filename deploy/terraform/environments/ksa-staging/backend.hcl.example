@@ -1,0 +1,3 @@
+# From the bootstrap output for this project.
+bucket = "ringsays-ksa-staging-tofu-state"
+prefix = "ringsays"

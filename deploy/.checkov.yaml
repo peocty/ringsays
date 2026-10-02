@@ -12,3 +12,26 @@ skip-check:
   - CKV_K8S_40
   # NATS password must be an environment variable: nats.conf expands only environment variables.
   - CKV_K8S_35
+  # Terraform (Google Cloud)
+  # Cloud SQL ssl_mode ENCRYPTED_ONLY enforces TLS; the check looks for the older require_ssl field.
+  - CKV_GCP_6
+  # PostgreSQL 16 is the version RingSays is tested on; upgrade is a planned change, not a default.
+  - CKV_GCP_79
+  # Statement and duration logging are off on purpose: they would put customer values in logs.
+  - CKV_GCP_111
+  - CKV2_GCP_13
+  - CKV_GCP_108
+  - CKV_GCP_109
+  # GKE Autopilot always runs the metadata server, Dataplane V2 network policy, no client certificates
+  # and intranode visibility rules of its own; these checks do not recognise Autopilot.
+  - CKV_GCP_69
+  - CKV_GCP_12
+  - CKV_GCP_13
+  - CKV_GCP_61
+  # Google Groups for RBAC needs the organisation's Workspace group; set authenticator_groups_config
+  # when the platform team's group exists.
+  - CKV_GCP_65
+  # Access logs bucket and state bucket: logging them into themselves is circular.
+  - CKV_GCP_62
+  # Federation condition pins repository and ref (main, release tags); the check expects another form.
+  - CKV_GCP_125

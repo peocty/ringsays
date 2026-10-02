@@ -5,3 +5,4 @@ resources: [job.yaml]
 # The pipeline pins the release image: kustomize edit set image ringsays/api=<registry>/api@sha256:...
 images:
   - name: ringsays/api
+    newTag: REPLACED_BY_PIPELINE

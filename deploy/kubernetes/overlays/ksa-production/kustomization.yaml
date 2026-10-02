@@ -14,6 +14,7 @@ configMapGenerator:
       annotations: { config.kubernetes.io/local-config: "true" }
   - name: ringsays-config
     behavior: merge
+    envs: [config.env]
     literals:
       - RINGSAYS_ENVIRONMENT=production
       - RINGSAYS_USE_MOCK_ADAPTERS=false
@@ -22,10 +23,7 @@ configMapGenerator:
       - RINGSAYS_STAFF_OIDC_ISSUER=https://staff-login.ringsays.example
       - RINGSAYS_PORTAL_ORIGINS=["https://portal.ringsays.example"]
       - RINGSAYS_PORTAL_REDIRECT_URIS=["https://portal.ringsays.example/auth/callback"]
-      - RINGSAYS_TRUSTED_PROXIES=["10.30.8.0/23"]
       - RINGSAYS_BLOB_BACKEND=gcs
-      - RINGSAYS_BLOB_BUCKET=ringsays-ksa-production-evidence
-      - RINGSAYS_BLOB_ENDPOINT=https://storage.me-central2.rep.googleapis.com
       - RINGSAYS_NATS_STREAM_REPLICAS=3
   - name: ringsays-portal-config
     behavior: merge
