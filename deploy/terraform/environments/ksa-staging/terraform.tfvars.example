@@ -2,5 +2,5 @@
 project_id        = "ringsays-ksa-staging"
 domain            = "staging.ringsays.sa"
 ops_cidrs         = ["10.250.0.0/24"] # operations VPN or Interconnect range
-github_repository = "Peocty/ringsays" # exactly as GitHub shows it: the federation check is case sensitive
+github_repository = "peocty/ringsays" # exactly as GitHub shows it: the federation check is case sensitive
 alert_email       = "ringsays-ops@peocit.com"
