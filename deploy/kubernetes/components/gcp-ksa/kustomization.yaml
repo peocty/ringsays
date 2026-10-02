@@ -106,6 +106,14 @@ replacements:
     targets:
       - select: { kind: NetworkPolicy, name: allow-redis }
         fieldPaths: ["spec.egress.0.to.0.ipBlock.cidr"]
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.REGIONAL_APIS_CIDR }
+    targets:
+      - select: { kind: NetworkPolicy, name: allow-cloud-apis }
+        fieldPaths: ["spec.egress.0.to.1.ipBlock.cidr"]
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.INTERNAL_ADDRESS_NAME }
+    targets:
+      - select: { kind: Gateway, name: ringsays-internal }
+        fieldPaths: ["spec.addresses.0.value"]
   - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.GOOGLE_APIS_CIDR }
     targets:
       - select: { kind: NetworkPolicy, name: allow-cloud-apis }

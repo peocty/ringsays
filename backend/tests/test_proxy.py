@@ -41,3 +41,17 @@ def test_middleware_sets_request_client() -> None:
     )
     direct = TestClient(app, client=("198.51.100.4", 5000))
     assert direct.get("/ip", headers={"X-Forwarded-For": "1.2.3.4"}).json()["ip"] == "198.51.100.4"
+
+
+def test_google_load_balancer_header_format() -> None:
+    # Regional external Application Load Balancer: "<client>, <load balancer address>", from a proxy
+    # in the proxy only subnet. Trusting the subnet and the load balancer address finds the client.
+    nets = parse_networks(["10.30.8.0/23", "34.166.10.20/32"])
+    assert client_from("10.30.8.17", "203.0.113.9, 34.166.10.20", nets) == "203.0.113.9"
+    # Client sent its own header first: still the real client.
+    assert client_from("10.30.8.17", "6.6.6.6, 203.0.113.9, 34.166.10.20", nets) == "203.0.113.9"
+    # Without the address trusted, everyone would look like the load balancer.
+    assert (
+        client_from("10.30.8.17", "203.0.113.9, 34.166.10.20", parse_networks(["10.30.8.0/23"]))
+        == "34.166.10.20"
+    )

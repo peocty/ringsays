@@ -18,6 +18,10 @@ if [ "$mode" = release ] && grep -q REPLACED_BY_PIPELINE "$overlay/kustomization
 fi
 
 kustomize build "$overlay" > "$rendered"
+if [ "$mode" = release ] && grep -n 'ringsays\.example' "$rendered"; then
+  echo "example values still in the overlay: run environment-from-terraform.sh and edit identity.env" >&2
+  exit 2
+fi
 
 # 1. Prerequisites only: what the migration job needs to start.
 python3 - "$rendered" > "$rendered.pre" <<'PY'

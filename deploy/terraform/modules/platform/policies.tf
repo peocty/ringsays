@@ -13,9 +13,10 @@ locals {
 }
 
 resource "google_org_policy_policy" "boolean" {
-  for_each = local.boolean_policies
-  name     = "projects/${var.project_id}/policies/${each.key}"
-  parent   = "projects/${var.project_id}"
+  for_each   = local.boolean_policies
+  name       = "projects/${var.project_id}/policies/${each.key}"
+  parent     = "projects/${var.project_id}"
+  depends_on = [google_project_service.apis]
   spec {
     rules {
       enforce = each.value ? "TRUE" : "FALSE"
@@ -25,8 +26,9 @@ resource "google_org_policy_policy" "boolean" {
 
 # Resources may be created in the Kingdom only.
 resource "google_org_policy_policy" "locations" {
-  name   = "projects/${var.project_id}/policies/gcp.resourceLocations"
-  parent = "projects/${var.project_id}"
+  depends_on = [google_project_service.apis]
+  name       = "projects/${var.project_id}/policies/gcp.resourceLocations"
+  parent     = "projects/${var.project_id}"
   spec {
     rules {
       values {
@@ -37,8 +39,9 @@ resource "google_org_policy_policy" "locations" {
 }
 
 resource "google_org_policy_policy" "public_access_prevention" {
-  name   = "projects/${var.project_id}/policies/storage.publicAccessPrevention"
-  parent = "projects/${var.project_id}"
+  depends_on = [google_project_service.apis]
+  name       = "projects/${var.project_id}/policies/storage.publicAccessPrevention"
+  parent     = "projects/${var.project_id}"
   spec {
     rules {
       enforce = "TRUE"
@@ -47,8 +50,9 @@ resource "google_org_policy_policy" "public_access_prevention" {
 }
 
 resource "google_org_policy_policy" "no_vm_external_ip" {
-  name   = "projects/${var.project_id}/policies/compute.vmExternalIpAccess"
-  parent = "projects/${var.project_id}"
+  depends_on = [google_project_service.apis]
+  name       = "projects/${var.project_id}/policies/compute.vmExternalIpAccess"
+  parent     = "projects/${var.project_id}"
   spec {
     rules {
       deny_all = "TRUE"

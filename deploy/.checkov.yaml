@@ -35,3 +35,6 @@ skip-check:
   - CKV_GCP_62
   # Federation condition pins repository and ref (main, release tags); the check expects another form.
   - CKV_GCP_125
+  # Evidence bucket keeps no versions on purpose: a document deleted on request must be gone (PDPL);
+  # a 7 day soft delete covers operator mistakes. State and access log buckets keep versioning.
+  - CKV_GCP_78

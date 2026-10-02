@@ -24,6 +24,8 @@ BEGIN
     CREATE ROLE ringsays_backoffice LOGIN PASSWORD 'ringsays_backoffice' NOBYPASSRLS;
   END IF;
 END $$;
--- Databases created before migration 0006: drop the old attribute.
+-- Databases created before migration 0006: drop the old attribute ONLY AFTER `alembic upgrade head`
+-- has applied 0006 to every database on this server (roles are server wide; without the system_roles
+-- policies the worker and back office would see no rows).
 ALTER ROLE ringsays_worker NOBYPASSRLS;
 ALTER ROLE ringsays_backoffice NOBYPASSRLS;

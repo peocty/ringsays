@@ -76,6 +76,8 @@ jobs:
           for r in OWNER APP WORKER BACKOFFICE; do export RINGSAYS_DB_PASSWORD_$r=$(openssl rand -hex 16); done
           python -m app.scripts.bootstrap_db
           python -m app.scripts.bootstrap_db   # idempotent (password rotation path)
+          PGPASSWORD=$RINGSAYS_DB_PASSWORD_APP psql -h 127.0.0.1 -U ringsays_app -d ringsays -c "select 1"
+          ! PGPASSWORD=wrong psql -h 127.0.0.1 -U ringsays_app -d ringsays -c "select 1"
           RINGSAYS_MIGRATION_DATABASE_URL=postgresql+psycopg://ringsays_owner:$RINGSAYS_DB_PASSWORD_OWNER@127.0.0.1:5432/ringsays alembic upgrade head
           test "$(psql -h 127.0.0.1 -U postgres -d ringsays -Atc "select count(*) from pg_roles where rolname like 'ringsays%' and (rolsuper or rolbypassrls)")" = 0
           test "$(psql -h 127.0.0.1 -U postgres -d ringsays -Atc "select count(*) from pg_policies where policyname='system_roles'")" -ge 20

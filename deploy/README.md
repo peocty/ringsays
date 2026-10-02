@@ -31,11 +31,12 @@ deploy/
 | Database | Cloud SQL PostgreSQL 16, regional HA in production | Private IP only, TLS (verify CA), CMEK, PITR 7 days, backups 35 days, pgAudit (DDL and roles), no statement logging |
 | Cache | Memorystore for Redis 7.2, Standard HA in production | AUTH, TLS, CMEK; holds counters and revocation lists only |
 | Events | NATS JetStream in cluster (1 node staging, 3 nodes production) | Password auth, file storage, stream on 3 replicas in production |
-| Evidence | Cloud Storage, me-central2 | CMEK, uniform access, public access prevention, versioning, soft delete 30 days, regional endpoint |
+| Evidence | Cloud Storage, me-central2 | CMEK, uniform access, public access prevention, no versioning (erasure on request is real), soft delete 7 days, regional endpoint |
 | Secrets | Secret Manager regional secrets, me-central2 | CMEK; External Secrets Operator copies them into per workload Kubernetes secrets, mounted as files |
-| Images | Artifact Registry, me-central2 | Immutable tags, deploy by digest, scanned Docker Hub mirror for NATS |
+| Images | Artifact Registry, me-central2 | Immutable tags, deploy by digest; mirrors of Docker Hub, ghcr.io and quay.io for NATS and add ons; binary authorization admits this registry only |
+| Cloud APIs | Private Google Access plus Private Service Connect regional endpoints | `storage.me-central2.rep.googleapis.com` and `secretmanager.me-central2.rep.googleapis.com` resolve to private addresses (regional endpoints are not served through Private Google Access) |
 | Egress | Cloud NAT with two fixed addresses | Organisations can allow list RingSays for webhooks |
-| Identity | Workload identity per workload, GitHub federation for CI | No service account keys anywhere (org policy forbids them) |
+| Identity | Workload identity per workload, GitHub federation for CI | No service account keys anywhere (org policy forbids them); CI accepted only from the matching GitHub environment, and inside the cluster only through `kubernetes/platform/ci-rbac.yaml` (no Secret reads, no exec) |
 
 Database roles: none is superuser, none has BYPASSRLS (migration 0006). The worker and back office
 cross tenants through an explicit `system_roles` policy; the API role is limited to tenant and own
@@ -69,20 +70,26 @@ tofu -chdir=deploy/terraform/environments/ksa-staging apply
 # 3. Overlay values from outputs, then commit them
 deploy/scripts/environment-from-terraform.sh ksa-staging
 
-# 4. Cluster add ons (platform team): External Secrets Operator in namespace external-secrets,
-#    its service account annotated with `tofu output external_secrets_service_account`.
-#    cert-manager if certificates are issued in cluster.
+# 4. Cluster add ons (platform team, cluster admin):
+#    - External Secrets Operator in namespace external-secrets, images through the mirror
+#      (me-central2-docker.pkg.dev/<project>/mirror-ghcr/external-secrets/external-secrets), its
+#      service account annotated with `tofu output external_secrets_service_account`
+#    - cert-manager if certificates are issued in cluster (mirror-quay/jetstack/...)
+#    - CI permissions: replace CI_SERVICE_ACCOUNT in deploy/kubernetes/platform/ci-rbac.yaml with
+#      `tofu output ci` service_account, then kubectl apply -f it
+#    - deploy/scripts/release.sh ksa-staging prerequisites   (creates the namespace and secret store)
 
 # 5. Database roles (once; again after a password rotation). Needs one pushed API image (run the
 #    release workflow's build once, or build and push by hand), pinned by digest:
-deploy/scripts/release.sh ksa-staging prerequisites            # namespace, identities, secrets only
 (cd deploy/kubernetes/jobs/bootstrap && kustomize edit set image ringsays/api=<repository>/api@sha256:<digest>)
 kustomize build deploy/kubernetes/jobs/bootstrap | kubectl apply -f -
 kubectl -n ringsays wait --for=condition=complete job/ringsays-db-bootstrap --timeout=300s
 kustomize build deploy/kubernetes/jobs/bootstrap | kubectl delete -f -     # admin credential leaves the cluster
 
-# 6. GitHub environment "ksa-staging": variables WIF_PROVIDER, CI_SERVICE_ACCOUNT (tofu output ci),
-#    IMAGE_REPOSITORY, CLUSTER_NAME, PROJECT_ID. Production: same, plus required reviewers.
+# 6. GitHub environment "ksa-staging" (the name must match: federation checks it): variables
+#    WIF_PROVIDER, CI_SERVICE_ACCOUNT (tofu output ci), IMAGE_REPOSITORY, CLUSTER_NAME, PROJECT_ID.
+#    "ksa-production": same, plus required reviewers and protected v* tags.
+#    Edit kubernetes/overlays/<env>/identity.env (identity provider issuers) and commit.
 
 # 7. Release: push a tag v0.x.y (staging), or run the release workflow for production.
 ```
@@ -123,16 +130,19 @@ Migrations must stay backward compatible with the running version (expand, then 
 
 - **Backups and recovery:** Cloud SQL automated backups (35 days production) and point in time
   recovery (7 days of logs). Restore into a new instance, run `bootstrap_db` against it, repoint the
-  `ringsays-db-url-*` secrets. Evidence bucket keeps versions and soft deleted objects for 30 days.
+  `ringsays-db-url-*` secrets.
 - **Disaster recovery:** Google Cloud has one region in the Kingdom; production spans its three zones.
   A second region inside the Kingdom means a second provider (Oracle Jeddah and Riyadh have two
   regions). Plan: nightly logical export to that provider's object storage, encrypted, kept in the Kingdom.
 - **Secret rotation:** taint the `random_password` (or `random_bytes`) resource, apply, rerun the
-  bootstrap job for database passwords, then `kubectl rollout restart` the workloads. External Secrets
-  refreshes every hour.
+  bootstrap job for database passwords (it sends SCRAM verifiers, so passwords never appear in the
+  pgAudit role log), then `kubectl rollout restart` the workloads. External Secrets refreshes hourly.
 - **Scaling:** API autoscales on CPU (3 to 20 in production). Worker replicas are safe to raise
   (leases, SKIP LOCKED). Cloud SQL tier and Redis size are Terraform variables.
-- **Maintenance windows:** Friday 03:00 to 07:00 Riyadh for GKE, Cloud SQL and Redis (Kingdom weekend).
+- **Maintenance windows (Kingdom weekend):** GKE Friday and Saturday 00:00 to 08:00 Riyadh; Cloud SQL
+  and Redis Friday 03:00 Riyadh.
+- **Erasure:** evidence deleted through the portal is gone from the bucket at once and from soft delete
+  after 7 days; database backups age out after 35 days (production).
 
 ## Not yet in place
 

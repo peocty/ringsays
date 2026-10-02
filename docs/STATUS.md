@@ -286,7 +286,32 @@ code did not check). Fixed in the shared client, so the RingSays app and the SDK
 | Terraform | Platform module, staging and production, state bootstrap (Google Cloud me-central2) | Checked here: fmt, tflint with Google ruleset, Checkov 120 passed; `tofu validate` and plan in CI (provider downloads blocked here) |
 | Release | Build, SBOM and provenance, Trivy, digest pinning, migrate then roll out, smoke test | Written; release script order tested with a recording kubectl; runs in CI |
 
-Test count: 753 backend tests (plus 3 against a real NATS server), unchanged frontend counts.
+Test count: 755 backend tests (including 3 against a real NATS server), unchanged frontend counts.
+
+### Independent review (stage 8)
+
+| # | Defect | Fix |
+| --- | --- | --- |
+| 1 | Binary authorization pattern `/*` matches one level only: every RingSays and add on image refused | `/**`; add ons (External Secrets, cert-manager) through ghcr.io and quay.io mirrors in the project registry |
+| 2 | Regional API endpoints (`*.me-central2.rep.googleapis.com`) are not served through Private Google Access: no secrets, no evidence storage | Private Service Connect regional endpoints for Storage and Secret Manager, private zone, network policy range |
+| 3 | GKE maintenance window below the 48 hours per 32 days minimum: cluster creation refused | Friday and Saturday nights, 64 hours |
+| 4 | Job pods without fsGroup could not read their 0400 secret files: every migration would fail | fsGroup on both jobs |
+| 5 | Google appends the load balancer address to X-Forwarded-For: everyone looked like one client | Public and internal gateway addresses trusted (fixed internal address added); test with the real header format |
+| 6 | CI federation accepted any v* tag and skipped production reviewers; project wide Kubernetes developer role could read every Secret | Federation bound to the GitHub environment claim; cluster viewer only; namespace RBAC without Secrets or exec |
+| 7 | pgAudit role logging would write role passwords to Cloud Logging | Bootstrap sends SCRAM verifiers; verified that the server log holds no password |
+| 8 | Overlay domains hardcoded, back office internal domain mismatched Terraform | Every domain value from Terraform outputs; identity providers in identity.env; release refuses example values |
+| 9 | Org policy and resource manager APIs not enabled | Enabled; policies depend on them |
+| 10 | Throttle rule before OWASP rules: allowed sign in requests skipped inspection | Throttle after the OWASP rules |
+| 11 | API replicas set in the Deployment and by the autoscaler | Autoscaler owns API replicas |
+| 12 | Evidence upload ran storage and database calls on the event loop | Runs in the threadpool |
+| 13 | Evidence versions kept 90 days after deletion (PDPL erasure) | No versioning; soft delete 7 days |
+| 14 | NATS pre stop drain referenced a missing pid file | pid_file set |
+| 15 | Access log bucket not writable by the storage logging group | Writer grant |
+
+Found while fixing review item 7, now fixed: role statements with `:` inside the password or verifier
+were read as bind parameters; password rotation as a non superuser failed (ALTER ROLE with attribute
+keywords needs superuser even when unchanged); the emulated managed server had used trust
+authentication, so password checks now run against SCRAM authentication.
 
 Found while building stage 8, now fixed: outbox relay against real NATS (no stream, so nothing was ever
 published); NATS client retrying a refused server indefinitely and stalling the worker; production

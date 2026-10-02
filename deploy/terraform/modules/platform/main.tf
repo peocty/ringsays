@@ -9,13 +9,15 @@ locals {
   # Private ranges (network policies and Kubernetes overlays read them from outputs).
   ranges = {
     nodes    = "${var.network_prefix}.0.0/22"
-    proxy    = "${var.network_prefix}.8.0/23" # load balancer proxies (regional external and internal)
+    psc      = "${var.network_prefix}.12.0/28" # private endpoints for regional Google APIs
+    proxy    = "${var.network_prefix}.8.0/23"  # load balancer proxies (regional external and internal)
     services = "${var.network_prefix}.32.0/20"
     sql      = "${var.network_prefix}.64.0/20" # private services access: Cloud SQL
     redis    = "${var.network_prefix}.80.0/24" # private services access: Memorystore
     pods     = "${var.network_prefix}.128.0/17"
   }
-  k8s_namespace = "ringsays"
+  k8s_namespace   = "ringsays"
+  internal_domain = "${var.environment}.ringsays.internal"
 }
 
 data "google_project" "this" {
@@ -42,6 +44,9 @@ resource "google_project_service" "apis" {
     "storage.googleapis.com",
     "sts.googleapis.com",
     "binaryauthorization.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "networkconnectivity.googleapis.com",
+    "orgpolicy.googleapis.com",
   ])
   project            = var.project_id
   service            = each.value

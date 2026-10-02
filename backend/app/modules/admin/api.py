@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, Path, Query, Response, Uploa
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 from sqlalchemy import select, text
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.db import anonymous_tx, tenant_tx
@@ -306,14 +307,22 @@ async def upload_document(
 ) -> dict[str, Any]:
     data = await file.read(org.MAX_DOCUMENT_BYTES + 1)
     content_type = org.validate_document(data)
-    store = blobs.get_store()
-    key = store.put(data)
-    try:
-        with tenant_tx(m.tenant_id) as conn:
-            return org.record_document(conn, m, kind, reference, file.filename, data, content_type, key, now)
-    except BaseException:
-        store.delete(key)  # nothing committed refers to it
-        raise
+
+    # Object storage and database calls block: run them off the event loop, or one slow upload would
+    # stall every other request on this process.
+    def store_and_record() -> dict[str, Any]:
+        store = blobs.get_store()
+        key = store.put(data)
+        try:
+            with tenant_tx(m.tenant_id) as conn:
+                return org.record_document(
+                    conn, m, kind, reference, file.filename, data, content_type, key, now
+                )
+        except BaseException:
+            store.delete(key)  # nothing committed refers to it
+            raise
+
+    return await run_in_threadpool(store_and_record)
 
 
 @router.delete(

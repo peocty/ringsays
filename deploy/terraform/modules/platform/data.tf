@@ -135,7 +135,7 @@ resource "google_redis_instance" "this" {
   depends_on = [google_service_networking_connection.private_services, google_kms_crypto_key_iam_member.agents]
 }
 
-# Verification evidence. Private, uniform access, customer managed key, soft delete for recovery.
+# Verification evidence. Private, uniform access, customer managed key, short soft delete.
 resource "google_storage_bucket" "evidence" {
   project                     = var.project_id
   name                        = "${var.project_id}-evidence"
@@ -148,20 +148,13 @@ resource "google_storage_bucket" "evidence" {
   encryption {
     default_kms_key_name = google_kms_crypto_key.keys["storage"].id
   }
+  # No versioning: a deleted document must really go (PDPL erasure). Soft delete keeps it 7 days for
+  # operator mistakes only; objects are never overwritten (create only writes).
   versioning {
-    enabled = true
+    enabled = false
   }
   soft_delete_policy {
-    retention_duration_seconds = 30 * 86400
-  }
-  lifecycle_rule {
-    condition {
-      days_since_noncurrent_time = 90
-      with_state                 = "ARCHIVED"
-    }
-    action {
-      type = "Delete"
-    }
+    retention_duration_seconds = 7 * 86400
   }
   logging {
     log_bucket = google_storage_bucket.access_logs.name
@@ -192,4 +185,11 @@ resource "google_storage_bucket" "access_logs" {
     }
   }
   depends_on = [google_kms_crypto_key_iam_member.agents]
+}
+
+# Cloud Storage writes usage and access logs as this Google group.
+resource "google_storage_bucket_iam_member" "access_logs_writer" {
+  bucket = google_storage_bucket.access_logs.name
+  role   = "roles/storage.objectCreator"
+  member = "group:cloud-storage-analytics@google.com"
 }

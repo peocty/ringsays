@@ -11,6 +11,10 @@ for the two system roles:
 - ringsays_worker      background jobs (delivery, expiry, outbox, webhooks) across tenants
 - ringsays_backoffice  RingSays reviewers; table grants still keep it away from intents and identity
 
+Upgrade order for an existing server: apply this migration to every RingSays database first, then
+remove BYPASSRLS from both roles (infra/sql/00-roles.sql, last lines). New servers (bootstrap_db)
+create the roles without it from the start.
+
 The API role ringsays_app stays limited to tenant_isolation and own row policies. Table grants, not
 these policies, decide what each role may touch at all.
 """

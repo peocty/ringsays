@@ -1,0 +1,61 @@
+# Applied once per cluster by the platform team (cluster admin). Gives the CI identity exactly what
+# deploy/scripts/release.sh needs: create and update RingSays objects in namespace ringsays, wait on
+# them, read job logs. No Secret access (External Secrets creates those), no exec, no port forward.
+# The namespace and the secret store are created once by the platform team (release.sh ... prerequisites);
+# CI may only update them.
+# Replace CI_SERVICE_ACCOUNT with `tofu output ci` service_account.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: ringsays-ci-cluster }
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    resourceNames: [ringsays]
+    verbs: [get, patch, update]
+  - apiGroups: [external-secrets.io]
+    resources: [clustersecretstores]
+    resourceNames: [ringsays]
+    verbs: [get, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: ringsays-ci-cluster }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: ringsays-ci-cluster }
+subjects:
+  - { apiGroup: rbac.authorization.k8s.io, kind: User, name: CI_SERVICE_ACCOUNT }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: ringsays-ci, namespace: ringsays }
+rules:
+  - apiGroups: ["", apps, batch, policy, autoscaling, networking.k8s.io, external-secrets.io, gateway.networking.k8s.io, networking.gke.io]
+    resources:
+      - configmaps
+      - services
+      - serviceaccounts
+      - deployments
+      - statefulsets
+      - jobs
+      - poddisruptionbudgets
+      - horizontalpodautoscalers
+      - networkpolicies
+      - externalsecrets
+      - gateways
+      - httproutes
+      - healthcheckpolicies
+      - gcpbackendpolicies
+      - ingresses
+    verbs: [get, list, watch, create, patch, update, delete]
+  - apiGroups: [""]
+    resources: [pods, pods/log, events]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [replicasets, controllerrevisions]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: ringsays-ci, namespace: ringsays }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: ringsays-ci }
+subjects:
+  - { apiGroup: rbac.authorization.k8s.io, kind: User, name: CI_SERVICE_ACCOUNT }

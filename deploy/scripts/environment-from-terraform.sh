@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Write the Kubernetes overlay's environment.env and config.env from OpenTofu outputs, so addresses,
-# names and ranges are never copied by hand. Usage: environment-from-terraform.sh ksa-staging
+# Write the Kubernetes overlay's value files (environment.env, config.env, portal.env,
+# backoffice-portal.env) from OpenTofu outputs, so domains, addresses, names and ranges are never typed
+# by hand. identity.env (identity provider issuers) is the one file people edit. Usage: environment-from-terraform.sh ksa-staging
 set -euo pipefail
 env="${1:?environment, for example ksa-staging}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,3 +19,5 @@ write() {
 }
 write kubernetes_environment "$overlay/environment.env"
 write ringsays_config "$overlay/config.env"
+write portal_config "$overlay/portal.env"
+write backoffice_portal_config "$overlay/backoffice-portal.env"

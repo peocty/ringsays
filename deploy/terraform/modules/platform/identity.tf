@@ -52,7 +52,8 @@ resource "google_service_account_iam_member" "external_secrets_wi" {
 }
 
 # GitHub Actions: build and push images, and deploy, through workload identity federation. Only the
-# named repository, only its main branch and release tags.
+# named repository, and only jobs running in this environment's GitHub environment (ksa-staging or
+# ksa-production), so production's required reviewers cannot be skipped by a workflow of one's own.
 resource "google_iam_workload_identity_pool" "github" {
   project                   = var.project_id
   workload_identity_pool_id = "github"
@@ -65,11 +66,12 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   workload_identity_pool_provider_id = "github"
   display_name                       = "GitHub"
   attribute_mapping = {
-    "google.subject"       = "assertion.sub"
-    "attribute.repository" = "assertion.repository"
-    "attribute.ref"        = "assertion.ref"
+    "google.subject"        = "assertion.sub"
+    "attribute.repository"  = "assertion.repository"
+    "attribute.ref"         = "assertion.ref"
+    "attribute.environment" = "assertion.environment"
   }
-  attribute_condition = "assertion.repository == '${var.github_repository}' && (assertion.ref == 'refs/heads/main' || assertion.ref.startsWith('refs/tags/v'))"
+  attribute_condition = "assertion.repository == '${var.github_repository}' && assertion.environment == 'ksa-${var.environment}'"
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
   }
@@ -95,8 +97,11 @@ resource "google_artifact_registry_repository_iam_member" "ci_push" {
   member     = google_service_account.ci.member
 }
 
-resource "google_project_iam_member" "ci_deploy" {
+# Cluster access for get-credentials and the DNS endpoint only. What CI may do inside the cluster is
+# Kubernetes RBAC (deploy/kubernetes/platform/ci-rbac.yaml): apply RingSays objects, never read
+# Secrets, never exec into pods.
+resource "google_project_iam_member" "ci_cluster" {
   project = var.project_id
-  role    = "roles/container.developer"
+  role    = "roles/container.clusterViewer"
   member  = google_service_account.ci.member
 }

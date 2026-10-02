@@ -4,7 +4,8 @@ Runs once per environment, and again whenever a password is rotated, as the serv
 That user has CREATEROLE and CREATEDB but is not a superuser, so nothing here needs superuser.
 It is idempotent:
 
-1. Create the four roles if missing (none is SUPERUSER, none has BYPASSRLS) and set their passwords.
+1. Create the four roles if missing (none is SUPERUSER, none has BYPASSRLS) and set their passwords,
+   sent as SCRAM verifiers: the plain password never reaches the server or its audit log.
 2. Create the database if missing and hand it to ringsays_owner (migrations then create everything).
 3. Only the four roles may connect; PUBLIC loses CONNECT and CREATE.
 
@@ -15,6 +16,9 @@ ringsays) and RINGSAYS_DB_PASSWORD_{OWNER,APP,WORKER,BACKOFFICE}. Nothing secret
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import os
 import re
 import sys
@@ -31,6 +35,18 @@ ROLES = {
 }
 _IDENT = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 MIN_PASSWORD = 24
+
+
+def scram_verifier(password: str, salt: bytes | None = None, iterations: int = 4096) -> str:
+    """PostgreSQL SCRAM-SHA-256 verifier, computed here so the server (and pgAudit, which logs role
+    statements in full) never sees the password itself."""
+    salt = salt if salt is not None else os.urandom(16)
+    salted = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
+    client_key = hmac.new(salted, b"Client Key", hashlib.sha256).digest()
+    stored_key = hashlib.sha256(client_key).digest()
+    server_key = hmac.new(salted, b"Server Key", hashlib.sha256).digest()
+    salt_b64, stored_b64, server_b64 = (base64.b64encode(x).decode() for x in (salt, stored_key, server_key))
+    return f"SCRAM-SHA-256${iterations}:{salt_b64}${stored_b64}:{server_b64}"
 
 
 def _q(s: str) -> str:
@@ -52,14 +68,29 @@ def bootstrap(
         with engine.connect() as c:
             admin = c.execute(text("SELECT current_user")).scalar_one()
             for key, role in ROLES.items():
-                exists = c.execute(text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": role}).first()
-                verb = "ALTER" if exists else "CREATE"
-                c.execute(
+                row = c.execute(
                     text(
-                        f"{verb} ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS "
-                        f"PASSWORD {_q(passwords[key])}"
+                        "SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb"
+                        " FROM pg_roles WHERE rolname = :r"
+                    ),
+                    {"r": role},
+                ).first()
+                verifier = _q(scram_verifier(passwords[key]))
+                # Raw driver SQL: text() would read ":..." inside the verifier as a bind parameter.
+                if row is None:
+                    c.exec_driver_sql(
+                        f"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS"
+                        f" PASSWORD {verifier}"
                     )
-                )
+                else:
+                    # Attributes can only be changed by a superuser, even to the same value: check them
+                    # instead, and change nothing but the password (rotation).
+                    if any(row):
+                        raise ValueError(
+                            f"role {role} has SUPERUSER, BYPASSRLS, CREATEROLE or CREATEDB; fix it first"
+                        )
+                    c.exec_driver_sql(f"ALTER ROLE {role} LOGIN PASSWORD {verifier}")
+                exists = row is not None
                 out.append(f"role {role}: {'updated' if exists else 'created'}")
             # Admin needs membership to hand the database over (PostgreSQL 16 rules for CREATEROLE).
             c.execute(text(f"GRANT {ROLES['OWNER']} TO {admin}"))

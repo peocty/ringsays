@@ -46,8 +46,33 @@ resource "google_artifact_registry_repository" "mirror" {
   depends_on = [google_kms_crypto_key_iam_member.agents]
 }
 
+# Add ons (External Secrets from ghcr.io, cert-manager from quay.io) come through mirrors too, so
+# binary authorization can allow this project's registry only.
+resource "google_artifact_registry_repository" "addon_mirror" {
+  for_each      = { ghcr = "https://ghcr.io", quay = "https://quay.io" }
+  project       = var.project_id
+  location      = var.region
+  repository_id = "mirror-${each.key}"
+  format        = "DOCKER"
+  mode          = "REMOTE_REPOSITORY"
+  kms_key_name  = google_kms_crypto_key.keys["registry"].id
+  labels        = local.labels
+  remote_repository_config {
+    description = each.value
+    docker_repository {
+      custom_repository {
+        uri = each.value
+      }
+    }
+  }
+  depends_on = [google_kms_crypto_key_iam_member.agents]
+}
+
 resource "google_artifact_registry_repository_iam_member" "nodes_pull" {
-  for_each   = toset([google_artifact_registry_repository.images.repository_id, google_artifact_registry_repository.mirror.repository_id])
+  for_each = toset(concat(
+    [google_artifact_registry_repository.images.repository_id, google_artifact_registry_repository.mirror.repository_id],
+    [for r in google_artifact_registry_repository.addon_mirror : r.repository_id],
+  ))
   project    = var.project_id
   location   = var.region
   repository = each.value

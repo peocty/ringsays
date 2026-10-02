@@ -64,6 +64,14 @@ output "ringsays_config" {
   value = module.platform.ringsays_config
 }
 
+output "portal_config" {
+  value = module.platform.portal_config
+}
+
+output "backoffice_portal_config" {
+  value = module.platform.backoffice_portal_config
+}
+
 output "image_repository" {
   value = module.platform.image_repository
 }

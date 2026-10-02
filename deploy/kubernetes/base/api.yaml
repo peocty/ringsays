@@ -6,7 +6,7 @@ metadata:
   name: ringsays-api
   labels: { app.kubernetes.io/name: ringsays-api, app.kubernetes.io/component: api }
 spec:
-  replicas: 2
+  # No replicas field: the autoscaler owns it (server side apply would otherwise fight it).
   revisionHistoryLimit: 5
   strategy:
     type: RollingUpdate

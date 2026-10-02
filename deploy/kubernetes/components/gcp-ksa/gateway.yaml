@@ -30,6 +30,8 @@ metadata:
   name: ringsays-internal
 spec:
   gatewayClassName: gke-l7-rilb
+  addresses:
+    - { type: NamedAddress, value: INTERNAL_ADDRESS_NAME }
   listeners:
     - name: https
       protocol: HTTPS

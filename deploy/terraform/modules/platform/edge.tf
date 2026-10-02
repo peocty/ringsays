@@ -1,3 +1,13 @@
+# Internal load balancer address for the back office Gateway (fixed, so it can be trusted as a proxy).
+resource "google_compute_address" "internal" {
+  project      = var.project_id
+  name         = "${local.name}-internal"
+  region       = var.region
+  subnetwork   = google_compute_subnetwork.nodes.id
+  address_type = "INTERNAL"
+  purpose      = "SHARED_LOADBALANCER_VIP"
+}
+
 # Public edge: one regional address for the regional external Application Load Balancer (Gateway),
 # and a regional Cloud Armor policy (global load balancing is not available under the KSA data boundary).
 resource "google_compute_address" "public" {
@@ -43,7 +53,7 @@ resource "google_compute_region_security_policy_rule" "otp_throttle" {
   project         = var.project_id
   region          = var.region
   security_policy = google_compute_region_security_policy.edge.name
-  priority        = 900
+  priority        = 1100 # after the OWASP rules: an allowed request must still be inspected first
   action          = "throttle"
   match {
     expr {

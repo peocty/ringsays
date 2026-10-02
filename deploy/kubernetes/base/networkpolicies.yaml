@@ -114,7 +114,9 @@ spec:
   podSelector: { matchLabels: { ringsays.io/cloud-apis: "true" } }
   policyTypes: [Egress]
   egress:
-    - to: [{ ipBlock: { cidr: 192.0.2.192/30 } }]  # CHANGE ME: private cloud API addresses
+    - to:
+        - ipBlock: { cidr: 192.0.2.192/30 }  # CHANGE ME: private cloud API addresses
+        - ipBlock: { cidr: 192.0.2.208/28 }  # CHANGE ME: private endpoints for regional cloud APIs
       ports: [{ protocol: TCP, port: 443 }]
     - to: [{ ipBlock: { cidr: 169.254.169.254/32 } }, { ipBlock: { cidr: 169.254.169.252/32 } }]
       ports:

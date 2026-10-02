@@ -14,28 +14,18 @@ configMapGenerator:
       annotations: { config.kubernetes.io/local-config: "true" }
   - name: ringsays-config
     behavior: merge
-    envs: [config.env]
+    envs: [config.env, identity.env]
     literals:
       - RINGSAYS_ENVIRONMENT=production
       - RINGSAYS_USE_MOCK_ADAPTERS=false
-      - RINGSAYS_JWT_ISSUER=https://api.ringsays.example
-      - RINGSAYS_ADMIN_OIDC_ISSUER=https://login.ringsays.example
-      - RINGSAYS_STAFF_OIDC_ISSUER=https://staff-login.ringsays.example
-      - RINGSAYS_PORTAL_ORIGINS=["https://portal.ringsays.example"]
-      - RINGSAYS_PORTAL_REDIRECT_URIS=["https://portal.ringsays.example/auth/callback"]
       - RINGSAYS_BLOB_BACKEND=gcs
       - RINGSAYS_NATS_STREAM_REPLICAS=3
   - name: ringsays-portal-config
     behavior: merge
-    literals:
-      - API_BASE=https://api.ringsays.example
-      - OIDC_AUTHORITY=https://login.ringsays.example
+    envs: [portal.env]
   - name: ringsays-backoffice-portal-config
     behavior: merge
-    literals:
-      - API_BASE=https://backoffice-api.ringsays.internal
-      - OIDC_AUTHORITY=https://staff-login.ringsays.example
-      - ORIGINS=["https://backoffice.ringsays.internal"]
+    envs: [backoffice-portal.env]
 images:
   - name: ringsays/api
     newName: me-central2-docker.pkg.dev/ringsays-ksa-production/ringsays/api
@@ -46,6 +36,16 @@ images:
   - name: nats
     newName: me-central2-docker.pkg.dev/ringsays-ksa-production/mirror/nats
     newTag: 2.11.9-alpine
+# Portals sign in against the same issuers the API trusts (one place to set them: identity.env).
+replacements:
+  - source: { kind: ConfigMap, name: ringsays-config, fieldPath: data.RINGSAYS_ADMIN_OIDC_ISSUER }
+    targets:
+      - select: { kind: ConfigMap, name: ringsays-portal-config }
+        fieldPaths: ["data.OIDC_AUTHORITY"]
+  - source: { kind: ConfigMap, name: ringsays-config, fieldPath: data.RINGSAYS_STAFF_OIDC_ISSUER }
+    targets:
+      - select: { kind: ConfigMap, name: ringsays-backoffice-portal-config }
+        fieldPaths: ["data.OIDC_AUTHORITY"]
 patches:
   - path: nats-cluster.yaml
   - target: { kind: StatefulSet, name: ringsays-nats }
@@ -65,7 +65,7 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value: { name: NATS_ROUTE_2, value: "nats://route:$(NATS_PASSWORD)@ringsays-nats-2.ringsays-nats-headless:6222" }
-  - target: { kind: Deployment, name: ringsays-(api|worker|portal) }
+  - target: { kind: Deployment, name: ringsays-(worker|portal) }
     patch: |-
       - op: replace
         path: /spec/replicas

@@ -88,12 +88,13 @@ resource "google_container_cluster" "this" {
     vulnerability_mode = "VULNERABILITY_BASIC"
   }
 
-  # Kingdom weekend: Friday early morning (Riyadh), outside banking hours.
+  # Kingdom weekend nights: Friday and Saturday 00:00 to 08:00 Riyadh (Thursday and Friday 21:00 UTC),
+  # 64 hours per 32 days (GKE requires at least 48).
   maintenance_policy {
     recurring_window {
-      start_time = "2026-01-02T00:00:00Z"
-      end_time   = "2026-01-02T04:00:00Z"
-      recurrence = "FREQ=WEEKLY;BYDAY=FR"
+      start_time = "2026-01-01T21:00:00Z"
+      end_time   = "2026-01-02T05:00:00Z"
+      recurrence = "FREQ=WEEKLY;BYDAY=TH,FR"
     }
   }
 
@@ -104,11 +105,14 @@ resource "google_container_cluster" "this" {
   depends_on = [google_project_service.apis, google_kms_crypto_key_iam_member.agents]
 }
 
-# Only images built by RingSays CI and stored in this project's registry may run.
+# Only images from this project's registry may run: RingSays images and the mirrors (Docker Hub,
+# GitHub and Quay registries) through which add ons such as External Secrets and cert-manager are
+# installed. "**" matches nested paths ("*" would match one level only and refuse everything).
+# Google's own system images are allowed by the global policy evaluation.
 resource "google_binary_authorization_policy" "this" {
   project = var.project_id
   admission_whitelist_patterns {
-    name_pattern = "${var.region}-docker.pkg.dev/${var.project_id}/*"
+    name_pattern = "${var.region}-docker.pkg.dev/${var.project_id}/**"
   }
   default_admission_rule {
     evaluation_mode  = "ALWAYS_DENY"

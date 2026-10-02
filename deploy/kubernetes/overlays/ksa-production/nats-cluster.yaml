@@ -11,6 +11,7 @@ data:
     port: 4222
     http_port: 8222
     server_name: $POD_NAME
+    pid_file: /var/run/nats/nats.pid
     max_payload: 1MB
     jetstream {
       store_dir: /data

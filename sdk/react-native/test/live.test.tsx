@@ -1,29 +1,54 @@
+/// <reference types="node" />
 /**
  * Against a running local API (MOCK adapters). Skipped when unreachable. Real Context Token from the
  * enterprise API, rendered and answered through IntentCard, then refused on a second install.
  */
 import { execFileSync } from "node:child_process";
+import http from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
 
 import { fireEvent, render, screen } from "@testing-library/react-native";
-import { fetch as undiciFetch } from "undici";
 
 import { IntentCard, RingSaysProvider, type KeyValueStore } from "../src";
 
 const API = process.env.RINGSAYS_API ?? "http://127.0.0.1:8000";
 const BACKEND = path.resolve(__dirname, "../../../backend");
 const rng = (n: number) => new Uint8Array(randomBytes(n));
-/** React Native's test setup replaces fetch with a stub; talk to the real API through undici. */
+/**
+ * React Native's test setup replaces fetch and the web stream globals, and undici's streamed bodies
+ * then sometimes never finish there. This client buffers the whole response with node:http and returns
+ * an ordinary Response, which is all the SDK needs (local API only).
+ */
 const nodeFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-  if (typeof input === "object" && "url" in input) {
-    const req = input as Request;
-    const headers: Record<string, string> = {};
-    req.headers.forEach((v, k) => (headers[k] = v));
-    const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.text();
-    return undiciFetch(req.url, { method: req.method, headers, body });
-  }
-  return undiciFetch(String(input), init as never);
+  const req = typeof input === "object" && "url" in input ? (input as Request) : null;
+  const url = new URL(req ? req.url : String(input));
+  const method = req?.method ?? init?.method ?? "GET";
+  const headers: Record<string, string> = {};
+  new Headers(req ? req.headers : (init?.headers as HeadersInit | undefined)).forEach((v, k) => (headers[k] = v));
+  const raw = req ? (method === "GET" || method === "HEAD" ? undefined : await req.text()) : init?.body;
+  if (raw instanceof URLSearchParams && !headers["content-type"]) headers["content-type"] = "application/x-www-form-urlencoded";
+  const body = raw === undefined || raw === null ? undefined : String(raw);
+  return new Promise<Response>((resolve, reject) => {
+    const r = http.request(
+      { host: url.hostname, port: url.port, path: url.pathname + url.search, method, headers, timeout: 15000 },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => {
+          const h = new Headers();
+          for (const [k, v] of Object.entries(res.headers)) if (typeof v === "string") h.set(k, v);
+          const status = res.statusCode ?? 0;
+          resolve(new Response(status === 204 ? null : Buffer.concat(chunks).toString("utf8"), { status, headers: h }));
+        });
+        res.on("error", reject);
+      },
+    );
+    r.on("timeout", () => r.destroy(new Error(`timeout ${method} ${url.pathname}`)));
+    r.on("error", reject);
+    if (body) r.write(body);
+    r.end();
+  });
 }) as unknown as typeof fetch;
 
 function store(): KeyValueStore {
@@ -32,9 +57,13 @@ function store(): KeyValueStore {
 }
 
 let up = false;
+let token = "";
+// Seeding starts Python and writes a tenant: slow when the whole workspace tests in parallel, so it
+// has its own time budget and the test's budget covers only the SDK behaviour.
 beforeAll(async () => {
   up = await nodeFetch(`${API}/health`).then((r) => r.ok).catch(() => false);
-});
+  if (up) token = await contextToken();
+}, 90_000);
 
 async function contextToken(): Promise<string> {
   const t = JSON.parse(
@@ -79,7 +108,6 @@ const card = (token: string, s: KeyValueStore) => (
 
 test("real Context Token: verified card in Arabic, answer, second install refused", async () => {
   if (!up) return console.warn("live SDK test skipped: API not reachable");
-  const token = await contextToken();
   const first = render(card(token, store()));
   expect(await screen.findByTestId("ringsays-verified", {}, { timeout: 10_000 })).toBeTruthy();
   expect(screen.getByText(/8291/)).toBeTruthy();

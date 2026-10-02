@@ -155,3 +155,70 @@ resource "google_compute_firewall" "lb_to_nodes" {
   }
   log_config { metadata = "INCLUDE_ALL_METADATA" }
 }
+
+# Regional Google API endpoints (me-central2.rep.googleapis.com) keep requests in the Kingdom but are
+# not served through Private Google Access: each one gets a Private Service Connect regional endpoint
+# with a fixed internal address, and a private zone points the regional host names at them.
+locals {
+  regional_apis = {
+    storage       = 4 # host offset inside the psc range
+    secretmanager = 5
+  }
+}
+
+resource "google_compute_subnetwork" "psc" {
+  project                  = var.project_id
+  name                     = "${local.name}-psc"
+  region                   = var.region
+  network                  = google_compute_network.this.id
+  ip_cidr_range            = local.ranges.psc
+  private_ip_google_access = true
+  log_config {
+    aggregation_interval = "INTERVAL_5_SEC"
+    flow_sampling        = 0.5
+    metadata             = "INCLUDE_ALL_METADATA"
+  }
+}
+
+resource "google_compute_address" "regional_api" {
+  for_each     = local.regional_apis
+  project      = var.project_id
+  name         = "${local.name}-${each.key}-rep"
+  region       = var.region
+  subnetwork   = google_compute_subnetwork.psc.id
+  address_type = "INTERNAL"
+  address      = cidrhost(local.ranges.psc, each.value)
+}
+
+resource "google_network_connectivity_regional_endpoint" "api" {
+  for_each          = local.regional_apis
+  project           = var.project_id
+  name              = "${local.name}-${each.key}"
+  location          = var.region
+  target_google_api = "${each.key}.${var.region}.rep.googleapis.com"
+  access_type       = "REGIONAL"
+  network           = google_compute_network.this.id
+  subnetwork        = google_compute_subnetwork.psc.id
+  address           = google_compute_address.regional_api[each.key].address
+  depends_on        = [google_project_service.apis]
+}
+
+resource "google_dns_managed_zone" "regional_apis" {
+  project    = var.project_id
+  name       = "${local.name}-rep-googleapis"
+  dns_name   = "${var.region}.rep.googleapis.com."
+  visibility = "private"
+  private_visibility_config {
+    networks { network_url = google_compute_network.this.id }
+  }
+}
+
+resource "google_dns_record_set" "regional_api" {
+  for_each     = local.regional_apis
+  project      = var.project_id
+  managed_zone = google_dns_managed_zone.regional_apis.name
+  name         = "${each.key}.${var.region}.rep.googleapis.com."
+  type         = "A"
+  ttl          = 300
+  rrdatas      = [google_network_connectivity_regional_endpoint.api[each.key].address]
+}
