@@ -23,11 +23,11 @@ Apple (APNs) for iOS; no in Kingdom alternative reaches stock phones.
   as Apple asks. A device token that is not hex is refused before it reaches the URL.
 - **Minimal payload.** A push carries the intent id, its kind and a fixed bilingual text (on iOS the ids
   also sit under `body`, where expo-notifications reads them); the app fetches the details over its own
-  authenticated session.
+  authenticated session. Nothing about the customer, the caller or the purpose passes through Google
+  or Apple.
 - **Dead tokens.** FCM UNREGISTERED and APNs 410 or BadDeviceToken clear that token (only if the app
   has not registered a new one meanwhile); every provider error goes into the delivery trail and the log.
-- **Back office** sends nothing, so it needs no provider settings or secrets. Nothing about the customer, the caller or
-  the purpose passes through Google or Apple.
+- **Back office** sends nothing, so it needs no provider settings or secrets.
 - **Fail at start, not per message.** Outside local, settings refuse real mode with any provider value
   missing; an unreadable Apple key stops the process at start.
 - **Logs** carry the provider name and the provider's message id only, never a number or a code.
