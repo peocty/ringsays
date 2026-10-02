@@ -1,0 +1,24 @@
+# Template for clouds other than Google Cloud (copy, then set values, images and S3 storage).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ringsays
+resources: [../../base]
+components: [../../components/generic-ingress]
+configMapGenerator:
+  - name: ringsays-environment
+    envs: [environment.env]
+    options:
+      annotations: { config.kubernetes.io/local-config: "true" }
+  - name: ringsays-config
+    behavior: merge
+    literals:
+      - RINGSAYS_ENVIRONMENT=staging
+      - RINGSAYS_USE_MOCK_ADAPTERS=true
+      - RINGSAYS_BLOB_BACKEND=s3
+      - RINGSAYS_BLOB_BUCKET=ringsays-evidence
+      - RINGSAYS_BLOB_ENDPOINT=https://objectstorage.example
+      - RINGSAYS_BLOB_REGION=me-riyadh-1
+      - RINGSAYS_TRUSTED_PROXIES=["10.40.0.0/24"]
+images:
+  - { name: ringsays/api, newName: registry.example/ringsays/api, newTag: example }
+  - { name: ringsays/portal, newName: registry.example/ringsays/portal, newTag: example }

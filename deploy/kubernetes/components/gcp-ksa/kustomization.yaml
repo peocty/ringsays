@@ -1,0 +1,112 @@
+# Google Cloud, Dammam (me-central2): regional load balancers, Cloud Armor, Secret Manager, workload
+# identity. Placeholders in capitals come from the overlay's "ringsays-environment" values (written
+# from Terraform outputs by deploy/scripts/environment-from-terraform.sh).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - secretstore.yaml
+  - gateway.yaml
+  - backend-policies.yaml
+patches:
+  - target: { kind: ServiceAccount, name: ringsays-api }
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value: { iam.gke.io/gcp-service-account: ringsays-api@GSA_DOMAIN }
+  - target: { kind: ServiceAccount, name: ringsays-worker }
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value: { iam.gke.io/gcp-service-account: ringsays-worker@GSA_DOMAIN }
+  - target: { kind: ServiceAccount, name: ringsays-backoffice }
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value: { iam.gke.io/gcp-service-account: ringsays-backoffice@GSA_DOMAIN }
+  - target: { kind: ServiceAccount, name: ringsays-jobs }
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value: { iam.gke.io/gcp-service-account: ringsays-jobs@GSA_DOMAIN }
+replacements:
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.PROJECT_ID }
+    targets:
+      - select: { kind: ClusterSecretStore, name: ringsays }
+        fieldPaths: ["spec.provider.gcpsm.projectID"]
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.GSA_DOMAIN }
+    targets:
+      - select: { kind: ServiceAccount, name: ringsays-api }
+        fieldPaths: ["metadata.annotations.[iam.gke.io/gcp-service-account]"]
+        options: { delimiter: "@", index: 1 }
+      - select: { kind: ServiceAccount, name: ringsays-worker }
+        fieldPaths: ["metadata.annotations.[iam.gke.io/gcp-service-account]"]
+        options: { delimiter: "@", index: 1 }
+      - select: { kind: ServiceAccount, name: ringsays-backoffice }
+        fieldPaths: ["metadata.annotations.[iam.gke.io/gcp-service-account]"]
+        options: { delimiter: "@", index: 1 }
+      - select: { kind: ServiceAccount, name: ringsays-jobs }
+        fieldPaths: ["metadata.annotations.[iam.gke.io/gcp-service-account]"]
+        options: { delimiter: "@", index: 1 }
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.DOMAIN }
+    targets:
+      - select: { kind: Gateway, name: ringsays-public }
+        fieldPaths: ["spec.listeners.0.hostname"]
+        options: { delimiter: "*.", index: 1 }
+      - select: { kind: HTTPRoute, name: ringsays-api }
+        fieldPaths: ["spec.hostnames.0"]
+        options: { delimiter: "api.", index: 1 }
+      - select: { kind: HTTPRoute, name: ringsays-api }
+        fieldPaths: ["spec.rules.0.filters.0.requestRedirect.hostname"]
+        options: { delimiter: "portal.", index: 1 }
+      - select: { kind: HTTPRoute, name: ringsays-portal }
+        fieldPaths: ["spec.hostnames.0"]
+        options: { delimiter: "portal.", index: 1 }
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.INTERNAL_DOMAIN }
+    targets:
+      - select: { kind: Gateway, name: ringsays-internal }
+        fieldPaths: ["spec.listeners.0.hostname"]
+        options: { delimiter: "*.", index: 1 }
+      - select: { kind: HTTPRoute, name: ringsays-backoffice }
+        fieldPaths: ["spec.hostnames.0"]
+        options: { delimiter: "backoffice-api.", index: 1 }
+      - select: { kind: HTTPRoute, name: ringsays-backoffice-portal }
+        fieldPaths: ["spec.hostnames.0"]
+        options: { delimiter: "backoffice.", index: 1 }
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.PUBLIC_ADDRESS_NAME }
+    targets:
+      - select: { kind: Gateway, name: ringsays-public }
+        fieldPaths: ["spec.addresses.0.value"]
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.SECURITY_POLICY }
+    targets:
+      - select: { kind: GCPBackendPolicy }
+        fieldPaths: ["spec.default.securityPolicy"]
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.LB_PROXY_CIDR }
+    targets:
+      - select: { kind: NetworkPolicy, name: allow-lb-to-public }
+        fieldPaths: ["spec.ingress.0.from.0.ipBlock.cidr"]
+      - select: { kind: NetworkPolicy, name: allow-lb-to-backoffice }
+        fieldPaths: ["spec.ingress.0.from.0.ipBlock.cidr"]
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.HEALTH_CHECK_CIDR }
+    targets:
+      - select: { kind: NetworkPolicy, name: allow-lb-to-public }
+        fieldPaths: ["spec.ingress.0.from.1.ipBlock.cidr"]
+      - select: { kind: NetworkPolicy, name: allow-lb-to-backoffice }
+        fieldPaths: ["spec.ingress.0.from.1.ipBlock.cidr"]
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.HEALTH_CHECK_CIDR_2 }
+    targets:
+      - select: { kind: NetworkPolicy, name: allow-lb-to-public }
+        fieldPaths: ["spec.ingress.0.from.2.ipBlock.cidr"]
+      - select: { kind: NetworkPolicy, name: allow-lb-to-backoffice }
+        fieldPaths: ["spec.ingress.0.from.2.ipBlock.cidr"]
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.DATABASE_CIDR }
+    targets:
+      - select: { kind: NetworkPolicy, name: allow-database }
+        fieldPaths: ["spec.egress.0.to.0.ipBlock.cidr"]
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.REDIS_CIDR }
+    targets:
+      - select: { kind: NetworkPolicy, name: allow-redis }
+        fieldPaths: ["spec.egress.0.to.0.ipBlock.cidr"]
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.GOOGLE_APIS_CIDR }
+    targets:
+      - select: { kind: NetworkPolicy, name: allow-cloud-apis }
+        fieldPaths: ["spec.egress.0.to.0.ipBlock.cidr"]

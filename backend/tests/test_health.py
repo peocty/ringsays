@@ -31,3 +31,17 @@ def test_ready_reports_dependencies(monkeypatch) -> None:  # type: ignore[no-unt
     r = TestClient(app).get("/ready")
     assert r.status_code == 503
     assert r.json() == {"status": "unavailable", "database": "unavailable", "redis": "ok"}
+
+
+def test_settings_read_secret_files(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+
+    from app.core import config
+
+    (tmp_path / "RINGSAYS_JWT_SECRET").write_text("from-a-file-0123456789")
+    (tmp_path / "RINGSAYS_DATABASE_URL").write_text("postgresql+psycopg://ringsays_app:pw@db:5432/ringsays\n")
+    monkeypatch.setenv("RINGSAYS_SETTINGS_DIR", str(tmp_path))
+    monkeypatch.delenv("RINGSAYS_JWT_SECRET", raising=False)
+    monkeypatch.delenv("RINGSAYS_DATABASE_URL", raising=False)
+    loaded = config._load()
+    assert loaded.jwt_secret == "from-a-file-0123456789"  # noqa: S105 (test value)
+    assert loaded.database_url == "postgresql+psycopg://ringsays_app:pw@db:5432/ringsays"

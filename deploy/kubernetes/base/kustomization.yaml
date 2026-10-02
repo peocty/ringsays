@@ -1,0 +1,19 @@
+# RingSays on any Kubernetes cluster. Apply an overlay, not this base: overlays set images, addresses,
+# domains and the cloud specific pieces (see deploy/README.md).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ringsays
+labels:
+  - pairs: { app.kubernetes.io/part-of: ringsays }
+    includeSelectors: false
+resources:
+  - namespace.yaml
+  - serviceaccounts.yaml
+  - config.yaml
+  - external-secrets.yaml
+  - networkpolicies.yaml
+  - nats.yaml
+  - api.yaml
+  - worker.yaml
+  - backoffice.yaml
+  - portal.yaml

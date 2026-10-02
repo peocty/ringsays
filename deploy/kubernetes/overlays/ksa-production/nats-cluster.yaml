@@ -1,0 +1,35 @@
+# Three node JetStream cluster (one per zone); events stream kept on three replicas.
+# NATS expands $VARIABLES only as whole values, never inside a URL, so each route URL (with the route
+# password) is composed by Kubernetes from the secret (see the StatefulSet patch). Verified on a real
+# three node cluster: routes up, meta leader elected, stream on three replicas.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ringsays-nats-config
+data:
+  nats.conf: |
+    port: 4222
+    http_port: 8222
+    server_name: $POD_NAME
+    max_payload: 1MB
+    jetstream {
+      store_dir: /data
+      max_file_store: 32GB
+    }
+    authorization {
+      user: ringsays
+      password: $NATS_PASSWORD
+    }
+    cluster {
+      name: ringsays
+      port: 6222
+      authorization {
+        user: route
+        password: $NATS_PASSWORD
+      }
+      routes: [
+        $NATS_ROUTE_0
+        $NATS_ROUTE_1
+        $NATS_ROUTE_2
+      ]
+    }

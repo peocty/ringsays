@@ -1,0 +1,14 @@
+# Checkov findings accepted on purpose (reviewed in stage 8). Anything else fails the build.
+skip-check:
+  # Digests are pinned at release (kustomize edit set image ...@sha256); templates carry names only.
+  - CKV_K8S_43
+  # With immutable digests, IfNotPresent is correct; Always only adds registry load and a start dependency.
+  - CKV_K8S_15
+  # No CPU limits by design: limits cause throttling under load; CPU requests and autoscaling instead.
+  - CKV_K8S_11
+  # Worker serves no traffic: liveness (heartbeat file) is the right signal, readiness has no meaning.
+  - CKV_K8S_9
+  # nginx-unprivileged image runs as its built in uid 101; a different uid is not verified for that image.
+  - CKV_K8S_40
+  # NATS password must be an environment variable: nats.conf expands only environment variables.
+  - CKV_K8S_35

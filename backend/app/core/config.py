@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LOCAL_JWT_SECRET = "local-development-only-secret-change-me-0123456789"  # noqa: S105
@@ -139,4 +141,13 @@ class Settings(BaseSettings):
             raise RuntimeError(f"RINGSAYS_PORTAL_ORIGINS must be https outside local: {insecure}")
 
 
-settings = Settings()
+def _load() -> Settings:
+    """Secrets may come as files (Kubernetes secret volume): RINGSAYS_SETTINGS_DIR holds one file per
+    setting, named like the variable (RINGSAYS_DATABASE_URL). Keeps them out of the process environment."""
+    secrets_dir = os.environ.get("RINGSAYS_SETTINGS_DIR")
+    if secrets_dir:
+        return Settings(_secrets_dir=secrets_dir)  # type: ignore[call-arg]
+    return Settings()
+
+
+settings = _load()

@@ -1,0 +1,87 @@
+# RingSays back office API (reviewers, staff identity provider). Internal only: no public route.
+# Only this deployment holds the back office database credential.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ringsays-backoffice
+  labels: { app.kubernetes.io/name: ringsays-backoffice, app.kubernetes.io/component: backoffice }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app.kubernetes.io/name: ringsays-backoffice }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: ringsays-backoffice, app.kubernetes.io/component: backoffice, ringsays.io/db-client: "true", ringsays.io/redis-client: "true", ringsays.io/nats-client: "true", ringsays.io/cloud-apis: "true" }
+    spec:
+      serviceAccountName: ringsays-backoffice
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector: { matchLabels: { app.kubernetes.io/name: ringsays-backoffice } }
+      containers:
+        - name: api
+          image: ringsays/api
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 8000 }]
+          envFrom:
+            - configMapRef: { name: ringsays-config }
+          env:
+            - { name: RINGSAYS_SETTINGS_DIR, value: /var/run/secrets/ringsays }
+            - { name: RINGSAYS_BACKOFFICE_ENABLED, value: "true" }
+            - name: RINGSAYS_PORTAL_ORIGINS
+              valueFrom: { configMapKeyRef: { name: ringsays-backoffice-portal-config, key: ORIGINS } }
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          lifecycle:
+            preStop: { sleep: { seconds: 10 } }
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits: { memory: 768Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            # Server CAs for verified TLS to PostgreSQL and Redis (referenced from the connection URLs).
+            - { name: tls-ca, mountPath: /etc/ringsays/tls, readOnly: true }
+            # Secrets as files (one per setting), not environment variables.
+            - { name: secrets, mountPath: /var/run/secrets/ringsays, readOnly: true }
+      volumes:
+        - name: tls-ca
+          secret: { secretName: ringsays-tls-ca, optional: true, defaultMode: 0444 }
+        - name: secrets
+          secret: { secretName: ringsays-backoffice-secrets, defaultMode: 0400 }
+        - name: tmp
+          emptyDir: { sizeLimit: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ringsays-backoffice
+  labels: { app.kubernetes.io/name: ringsays-backoffice }
+spec:
+  selector: { app.kubernetes.io/name: ringsays-backoffice }
+  ports: [{ name: http, port: 80, targetPort: http }]

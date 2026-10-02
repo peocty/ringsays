@@ -1,0 +1,66 @@
+# Load balancer health checks use readiness (/ready), so a pod that lost its database leaves rotation.
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata: { name: ringsays-api }
+spec:
+  default:
+    checkIntervalSec: 5
+    timeoutSec: 3
+    healthyThreshold: 1
+    unhealthyThreshold: 2
+    config:
+      type: HTTP
+      httpHealthCheck: { port: 8000, requestPath: /ready }
+  targetRef: { group: "", kind: Service, name: ringsays-api }
+---
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata: { name: ringsays-backoffice }
+spec:
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck: { port: 8000, requestPath: /ready }
+  targetRef: { group: "", kind: Service, name: ringsays-backoffice }
+---
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata: { name: ringsays-portal }
+spec:
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck: { port: 8080, requestPath: /config.js }
+  targetRef: { group: "", kind: Service, name: ringsays-portal }
+---
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata: { name: ringsays-backoffice-portal }
+spec:
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck: { port: 8080, requestPath: /config.js }
+  targetRef: { group: "", kind: Service, name: ringsays-backoffice-portal }
+---
+# Cloud Armor (regional policy: rate limits, OWASP rules, geography) and request logs on the public edge.
+apiVersion: networking.gke.io/v1
+kind: GCPBackendPolicy
+metadata: { name: ringsays-api }
+spec:
+  default:
+    securityPolicy: SECURITY_POLICY
+    timeoutSec: 30
+    logging: { enabled: true, sampleRate: 1000000 }
+    connectionDraining: { drainingTimeoutSec: 15 }
+  targetRef: { group: "", kind: Service, name: ringsays-api }
+---
+apiVersion: networking.gke.io/v1
+kind: GCPBackendPolicy
+metadata: { name: ringsays-portal }
+spec:
+  default:
+    securityPolicy: SECURITY_POLICY
+    timeoutSec: 15
+    logging: { enabled: true, sampleRate: 100000 }
+  targetRef: { group: "", kind: Service, name: ringsays-portal }

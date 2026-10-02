@@ -1,0 +1,41 @@
+# Settings that are not secret. Overlays replace the values; every secret comes from external-secrets.yaml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ringsays-config
+data:
+  RINGSAYS_ENVIRONMENT: production
+  RINGSAYS_RESIDENCY_REGION: KSA
+  RINGSAYS_USE_MOCK_ADAPTERS: "false"
+  RINGSAYS_BACKOFFICE_ENABLED: "false"
+  RINGSAYS_JWT_ISSUER: https://api.ringsays.example
+  RINGSAYS_ADMIN_OIDC_ISSUER: https://login.ringsays.example
+  RINGSAYS_STAFF_OIDC_ISSUER: https://staff-login.ringsays.example
+  RINGSAYS_PORTAL_ORIGINS: '["https://portal.ringsays.example"]'
+  RINGSAYS_PORTAL_REDIRECT_URIS: '["https://portal.ringsays.example/auth/callback"]'
+  RINGSAYS_TRUSTED_PROXIES: "[]"
+  RINGSAYS_BLOB_BACKEND: gcs
+  RINGSAYS_BLOB_BUCKET: ringsays-evidence
+  RINGSAYS_BLOB_PREFIX: evidence/
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ringsays-portal-config
+data:
+  API_BASE: https://api.ringsays.example
+  OIDC_AUTHORITY: https://login.ringsays.example
+  OIDC_CLIENT_ID: ringsays-portal
+  PORTAL_TIME_ZONE: Asia/Riyadh
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ringsays-backoffice-portal-config
+data:
+  API_BASE: https://backoffice-api.ringsays.internal
+  OIDC_AUTHORITY: https://staff-login.ringsays.example
+  # Read by the back office API as its allowed browser origin (JSON list).
+  ORIGINS: '["https://backoffice.ringsays.internal"]'
+  OIDC_CLIENT_ID: ringsays-backoffice
+  PORTAL_TIME_ZONE: Asia/Riyadh

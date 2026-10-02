@@ -1,0 +1,92 @@
+# Regional load balancers only: the KSA data boundary does not allow global load balancing.
+# Public: regional external Application Load Balancer for the API and the organisation portal.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: ringsays-public
+spec:
+  gatewayClassName: gke-l7-regional-external-managed
+  addresses:
+    - { type: NamedAddress, value: PUBLIC_ADDRESS_NAME }
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "*.DOMAIN"
+      tls:
+        mode: Terminate
+        certificateRefs: [{ kind: Secret, name: ringsays-public-tls }]
+      allowedRoutes: { namespaces: { from: Same } }
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes: { namespaces: { from: Same } }
+---
+# Internal: regional internal Application Load Balancer, reachable only from the VPC (reviewers come
+# in through the corporate VPN or Interconnect). Back office API and portal.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: ringsays-internal
+spec:
+  gatewayClassName: gke-l7-rilb
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "*.INTERNAL_DOMAIN"
+      tls:
+        mode: Terminate
+        certificateRefs: [{ kind: Secret, name: ringsays-internal-tls }]
+      allowedRoutes: { namespaces: { from: Same } }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: redirect-to-https }
+spec:
+  parentRefs: [{ name: ringsays-public, sectionName: http }]
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect: { scheme: https, statusCode: 301 }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: ringsays-api }
+spec:
+  parentRefs: [{ name: ringsays-public, sectionName: https }]
+  hostnames: ["api.DOMAIN"]
+  rules:
+    # Local only tools never reach the edge, even if a build were misconfigured.
+    - matches: [{ path: { type: PathPrefix, value: /dev } }]
+      filters:
+        - type: RequestRedirect
+          requestRedirect: { hostname: "portal.DOMAIN", path: { type: ReplaceFullPath, replaceFullPath: / }, statusCode: 302 }
+    - backendRefs: [{ name: ringsays-api, port: 80 }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: ringsays-portal }
+spec:
+  parentRefs: [{ name: ringsays-public, sectionName: https }]
+  hostnames: ["portal.DOMAIN"]
+  rules:
+    - backendRefs: [{ name: ringsays-portal, port: 80 }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: ringsays-backoffice }
+spec:
+  parentRefs: [{ name: ringsays-internal, sectionName: https }]
+  hostnames: ["backoffice-api.INTERNAL_DOMAIN"]
+  rules:
+    - backendRefs: [{ name: ringsays-backoffice, port: 80 }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: ringsays-backoffice-portal }
+spec:
+  parentRefs: [{ name: ringsays-internal, sectionName: https }]
+  hostnames: ["backoffice.INTERNAL_DOMAIN"]
+  rules:
+    - backendRefs: [{ name: ringsays-backoffice-portal, port: 80 }]

@@ -1,0 +1,56 @@
+# Any Kubernetes cluster with ingress-nginx and cert-manager (Oracle OKE, Alibaba ACK, Huawei CCE,
+# Amazon EKS in Riyadh, on premises). Public and internal ingress classes are separate controllers;
+# the internal one must only be reachable from the RingSays operations network.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ringsays-public
+  annotations:
+    cert-manager.io/cluster-issuer: ringsays-public
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 6m
+spec:
+  ingressClassName: nginx-public
+  tls:
+    - hosts: [api.DOMAIN, portal.DOMAIN]
+      secretName: ringsays-public-tls
+  rules:
+    - host: api.DOMAIN
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: ringsays-api, port: { name: http } } }
+    - host: portal.DOMAIN
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: ringsays-portal, port: { name: http } } }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ringsays-internal
+  annotations:
+    cert-manager.io/cluster-issuer: ringsays-internal
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 6m
+spec:
+  ingressClassName: nginx-internal
+  tls:
+    - hosts: [backoffice-api.INTERNAL_DOMAIN, backoffice.INTERNAL_DOMAIN]
+      secretName: ringsays-internal-tls
+  rules:
+    - host: backoffice-api.INTERNAL_DOMAIN
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: ringsays-backoffice, port: { name: http } } }
+    - host: backoffice.INTERNAL_DOMAIN
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: ringsays-backoffice-portal, port: { name: http } } }

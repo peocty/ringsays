@@ -1,0 +1,165 @@
+# Organisation portal (public, static files plus runtime configuration).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ringsays-portal
+  labels: { app.kubernetes.io/name: ringsays-portal, app.kubernetes.io/component: portal }
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app.kubernetes.io/name: ringsays-portal }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: ringsays-portal, app.kubernetes.io/component: portal }
+    spec:
+      serviceAccountName: ringsays-portal
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: { matchLabels: { app.kubernetes.io/name: ringsays-portal } }
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector: { matchLabels: { app.kubernetes.io/name: ringsays-portal } }
+      containers:
+        - name: portal
+          image: ringsays/portal
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 8080 }]
+          envFrom:
+            - configMapRef: { name: ringsays-portal-config }
+          readinessProbe:
+            httpGet: { path: /config.js, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /config.js, port: http }
+            periodSeconds: 15
+          lifecycle:
+            preStop: { sleep: { seconds: 5 } }
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            # nginx renders its configuration at start and keeps temp files: the only writable paths.
+            - { name: conf, mountPath: /etc/nginx/conf.d }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: conf
+          emptyDir: { sizeLimit: 1Mi }
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ringsays-portal
+  labels: { app.kubernetes.io/name: ringsays-portal }
+spec:
+  selector: { app.kubernetes.io/name: ringsays-portal }
+  ports: [{ name: http, port: 80, targetPort: http }]
+---
+# Back office portal for RingSays reviewers (internal only), same image with staff sign in.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ringsays-backoffice-portal
+  labels: { app.kubernetes.io/name: ringsays-backoffice-portal, app.kubernetes.io/component: backoffice-portal }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app.kubernetes.io/name: ringsays-backoffice-portal }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: ringsays-backoffice-portal, app.kubernetes.io/component: backoffice-portal }
+    spec:
+      serviceAccountName: ringsays-portal
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: { matchLabels: { app.kubernetes.io/name: ringsays-backoffice-portal } }
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector: { matchLabels: { app.kubernetes.io/name: ringsays-backoffice-portal } }
+      containers:
+        - name: portal
+          image: ringsays/portal
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 8080 }]
+          envFrom:
+            - configMapRef: { name: ringsays-backoffice-portal-config }
+          readinessProbe:
+            httpGet: { path: /config.js, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /config.js, port: http }
+            periodSeconds: 15
+          lifecycle:
+            preStop: { sleep: { seconds: 5 } }
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            # nginx renders its configuration at start and keeps temp files: the only writable paths.
+            - { name: conf, mountPath: /etc/nginx/conf.d }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: conf
+          emptyDir: { sizeLimit: 1Mi }
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ringsays-backoffice-portal
+  labels: { app.kubernetes.io/name: ringsays-backoffice-portal }
+spec:
+  selector: { app.kubernetes.io/name: ringsays-backoffice-portal }
+  ports: [{ name: http, port: 80, targetPort: http }]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: ringsays-portal }
+spec:
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  minAvailable: 1
+  selector: { matchLabels: { app.kubernetes.io/name: ringsays-portal } }

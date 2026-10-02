@@ -1,0 +1,140 @@
+# Default deny, then allow by role label. Address ranges marked CHANGE ME are placeholders from the
+# documentation range (192.0.2.0/24): until an overlay sets the real ones, that traffic is refused
+# (fails closed). The GCP overlay sets them from Terraform outputs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-dns }
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+        - ipBlock: { cidr: 169.254.20.10/32 }   # node local DNS cache
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# Load balancer to the public API and portal (proxy subnet and health checkers).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-lb-to-public }
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [ringsays-api, ringsays-portal] }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock: { cidr: 192.0.2.0/26 }   # CHANGE ME: load balancer proxy subnet
+        - ipBlock: { cidr: 192.0.2.64/27 }  # CHANGE ME: load balancer health checkers
+        - ipBlock: { cidr: 192.0.2.96/27 }  # CHANGE ME: load balancer health checkers (second range)
+      ports:
+        - { protocol: TCP, port: 8000 }
+        - { protocol: TCP, port: 8080 }
+---
+# Internal load balancer to the back office (reviewers' network only, enforced at the load balancer).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-lb-to-backoffice }
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [ringsays-backoffice, ringsays-backoffice-portal] }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock: { cidr: 192.0.2.0/26 }   # CHANGE ME: load balancer proxy subnet
+        - ipBlock: { cidr: 192.0.2.64/27 }  # CHANGE ME: load balancer health checkers
+        - ipBlock: { cidr: 192.0.2.96/27 }  # CHANGE ME: load balancer health checkers (second range)
+      ports:
+        - { protocol: TCP, port: 8000 }
+        - { protocol: TCP, port: 8080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-database }
+spec:
+  podSelector: { matchLabels: { ringsays.io/db-client: "true" } }
+  policyTypes: [Egress]
+  egress:
+    - to: [{ ipBlock: { cidr: 192.0.2.128/27 } }]  # CHANGE ME: managed PostgreSQL private range
+      ports: [{ protocol: TCP, port: 5432 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-redis }
+spec:
+  podSelector: { matchLabels: { ringsays.io/redis-client: "true" } }
+  policyTypes: [Egress]
+  egress:
+    - to: [{ ipBlock: { cidr: 192.0.2.160/27 } }]  # CHANGE ME: managed Redis private range
+      ports:
+        - { protocol: TCP, port: 6378 }  # TLS (Memorystore)
+        - { protocol: TCP, port: 6379 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-nats-clients }
+spec:
+  podSelector: { matchLabels: { ringsays.io/nats-client: "true" } }
+  policyTypes: [Egress]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: ringsays-nats } } }]
+      ports: [{ protocol: TCP, port: 4222 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: nats }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: ringsays-nats } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { ringsays.io/nats-client: "true" } } }]
+      ports: [{ protocol: TCP, port: 4222 }]
+    - from: [{ podSelector: { matchLabels: { app.kubernetes.io/name: ringsays-nats } } }]
+      ports: [{ protocol: TCP, port: 6222 }]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: ringsays-nats } } }]
+      ports: [{ protocol: TCP, port: 6222 }]
+---
+# Cloud APIs (object storage, secrets) through private access, and workload identity metadata.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-cloud-apis }
+spec:
+  podSelector: { matchLabels: { ringsays.io/cloud-apis: "true" } }
+  policyTypes: [Egress]
+  egress:
+    - to: [{ ipBlock: { cidr: 192.0.2.192/30 } }]  # CHANGE ME: private cloud API addresses
+      ports: [{ protocol: TCP, port: 443 }]
+    - to: [{ ipBlock: { cidr: 169.254.169.254/32 } }, { ipBlock: { cidr: 169.254.169.252/32 } }]
+      ports:
+        - { protocol: TCP, port: 80 }
+        - { protocol: TCP, port: 988 }
+---
+# Public internet on 443 only, never private ranges: organisations' webhooks (worker), identity
+# provider keys (API, back office). Narrow further with FQDN policies or an egress proxy when the
+# provider list is fixed (SMS, push, identity providers).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-internet-https }
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [ringsays-api, ringsays-worker, ringsays-backoffice] }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 127.0.0.0/8]
+      ports: [{ protocol: TCP, port: 443 }]

@@ -81,12 +81,23 @@ def bootstrap(
     return out
 
 
+def _value(name: str, default: str = "") -> str:
+    """Environment variable, or a file of that name in RINGSAYS_SETTINGS_DIR (secret volume)."""
+    secrets_dir = os.environ.get("RINGSAYS_SETTINGS_DIR")
+    if secrets_dir:
+        path = os.path.join(secrets_dir, name)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                return f.read().strip()
+    return os.environ.get(name, default)
+
+
 def main() -> None:
-    admin_url = os.environ.get("RINGSAYS_BOOTSTRAP_ADMIN_URL")
+    admin_url = _value("RINGSAYS_BOOTSTRAP_ADMIN_URL")
     if not admin_url:
         raise SystemExit("RINGSAYS_BOOTSTRAP_ADMIN_URL is not set")
-    database = os.environ.get("RINGSAYS_BOOTSTRAP_DATABASE", "ringsays")
-    passwords = {k: os.environ.get(f"RINGSAYS_DB_PASSWORD_{k}", "") for k in ROLES}
+    database = _value("RINGSAYS_BOOTSTRAP_DATABASE", "ringsays")
+    passwords = {k: _value(f"RINGSAYS_DB_PASSWORD_{k}") for k in ROLES}
     try:
         for line in bootstrap(admin_url, database, passwords):
             print(line)

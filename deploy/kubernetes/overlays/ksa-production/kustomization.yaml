@@ -1,0 +1,92 @@
+# Production in Google Cloud Dammam. Real providers only (the API refuses MOCK adapters here), three
+# zones, autoscaling, three node NATS cluster.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ringsays
+resources:
+  - ../../base
+components:
+  - ../../components/gcp-ksa
+configMapGenerator:
+  - name: ringsays-environment
+    envs: [environment.env]
+    options:
+      annotations: { config.kubernetes.io/local-config: "true" }
+  - name: ringsays-config
+    behavior: merge
+    literals:
+      - RINGSAYS_ENVIRONMENT=production
+      - RINGSAYS_USE_MOCK_ADAPTERS=false
+      - RINGSAYS_JWT_ISSUER=https://api.ringsays.example
+      - RINGSAYS_ADMIN_OIDC_ISSUER=https://login.ringsays.example
+      - RINGSAYS_STAFF_OIDC_ISSUER=https://staff-login.ringsays.example
+      - RINGSAYS_PORTAL_ORIGINS=["https://portal.ringsays.example"]
+      - RINGSAYS_PORTAL_REDIRECT_URIS=["https://portal.ringsays.example/auth/callback"]
+      - RINGSAYS_TRUSTED_PROXIES=["10.30.8.0/23"]
+      - RINGSAYS_BLOB_BACKEND=gcs
+      - RINGSAYS_BLOB_BUCKET=ringsays-ksa-production-evidence
+      - RINGSAYS_BLOB_ENDPOINT=https://storage.me-central2.rep.googleapis.com
+      - RINGSAYS_NATS_STREAM_REPLICAS=3
+  - name: ringsays-portal-config
+    behavior: merge
+    literals:
+      - API_BASE=https://api.ringsays.example
+      - OIDC_AUTHORITY=https://login.ringsays.example
+  - name: ringsays-backoffice-portal-config
+    behavior: merge
+    literals:
+      - API_BASE=https://backoffice-api.ringsays.internal
+      - OIDC_AUTHORITY=https://staff-login.ringsays.example
+      - ORIGINS=["https://backoffice.ringsays.internal"]
+images:
+  - name: ringsays/api
+    newName: me-central2-docker.pkg.dev/ringsays-ksa-production/ringsays/api
+    newTag: REPLACED_BY_PIPELINE
+  - name: ringsays/portal
+    newName: me-central2-docker.pkg.dev/ringsays-ksa-production/ringsays/portal
+    newTag: REPLACED_BY_PIPELINE
+  - name: nats
+    newName: me-central2-docker.pkg.dev/ringsays-ksa-production/mirror/nats
+    newTag: 2.11.9-alpine
+patches:
+  - path: nats-cluster.yaml
+  - target: { kind: StatefulSet, name: ringsays-nats }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 50Gi
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: { name: NATS_ROUTE_0, value: "nats://route:$(NATS_PASSWORD)@ringsays-nats-0.ringsays-nats-headless:6222" }
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: { name: NATS_ROUTE_1, value: "nats://route:$(NATS_PASSWORD)@ringsays-nats-1.ringsays-nats-headless:6222" }
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: { name: NATS_ROUTE_2, value: "nats://route:$(NATS_PASSWORD)@ringsays-nats-2.ringsays-nats-headless:6222" }
+  - target: { kind: Deployment, name: ringsays-(api|worker|portal) }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+  - target: { kind: Deployment, name: ringsays-(backoffice|backoffice-portal) }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+  - target: { kind: HorizontalPodAutoscaler, name: ringsays-api }
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 3
+      - op: replace
+        path: /spec/maxReplicas
+        value: 20
+  - target: { kind: PodDisruptionBudget, name: ringsays-(api|portal) }
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 2

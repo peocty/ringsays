@@ -1,0 +1,41 @@
+# Cloud neutral edge and secrets. Overlay supplies DOMAIN and INTERNAL_DOMAIN through
+# "ringsays-environment" like the GCP component, plus network policy address ranges.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - ingress.yaml
+  - secretstore.yaml
+replacements:
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.DOMAIN }
+    targets:
+      - select: { kind: Ingress, name: ringsays-public }
+        fieldPaths: ["spec.tls.0.hosts.0", "spec.rules.0.host"]
+        options: { delimiter: "api.", index: 1 }
+      - select: { kind: Ingress, name: ringsays-public }
+        fieldPaths: ["spec.tls.0.hosts.1", "spec.rules.1.host"]
+        options: { delimiter: "portal.", index: 1 }
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.INTERNAL_DOMAIN }
+    targets:
+      - select: { kind: Ingress, name: ringsays-internal }
+        fieldPaths: ["spec.tls.0.hosts.0", "spec.rules.0.host"]
+        options: { delimiter: "backoffice-api.", index: 1 }
+      - select: { kind: Ingress, name: ringsays-internal }
+        fieldPaths: ["spec.tls.0.hosts.1", "spec.rules.1.host"]
+        options: { delimiter: "backoffice.", index: 1 }
+      - select: { kind: ClusterSecretStore, name: ringsays }
+        fieldPaths: ["spec.provider.vault.server"]
+        options: { delimiter: "vault.", index: 1 }
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.LB_PROXY_CIDR }
+    targets:
+      - select: { kind: NetworkPolicy, name: allow-lb-to-public }
+        fieldPaths: ["spec.ingress.0.from.0.ipBlock.cidr"]
+      - select: { kind: NetworkPolicy, name: allow-lb-to-backoffice }
+        fieldPaths: ["spec.ingress.0.from.0.ipBlock.cidr"]
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.DATABASE_CIDR }
+    targets:
+      - select: { kind: NetworkPolicy, name: allow-database }
+        fieldPaths: ["spec.egress.0.to.0.ipBlock.cidr"]
+  - source: { kind: ConfigMap, name: ringsays-environment, fieldPath: data.REDIS_CIDR }
+    targets:
+      - select: { kind: NetworkPolicy, name: allow-redis }
+        fieldPaths: ["spec.egress.0.to.0.ipBlock.cidr"]
