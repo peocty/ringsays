@@ -41,6 +41,37 @@ jobs:
       - run: mypy
       - run: pytest
 
+  # Managed PostgreSQL has no superuser: bootstrap and migrate as a CREATEROLE admin, like Cloud SQL.
+  managed-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    env:
+      PGPASSWORD: postgres
+      RINGSAYS_ENVIRONMENT: local
+    defaults:
+      run: { working-directory: backend }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e ".[dev]"
+      - name: Admin like Cloud SQL (CREATEROLE, CREATEDB, not superuser)
+        run: psql -h 127.0.0.1 -U postgres -c "CREATE ROLE cloud_admin LOGIN CREATEROLE CREATEDB NOSUPERUSER PASSWORD 'cloud_admin'"
+      - name: Bootstrap, migrate, verify
+        run: |
+          export RINGSAYS_BOOTSTRAP_ADMIN_URL=postgresql+psycopg://cloud_admin:cloud_admin@127.0.0.1:5432/postgres
+          for r in OWNER APP WORKER BACKOFFICE; do export RINGSAYS_DB_PASSWORD_$r=$(openssl rand -hex 16); done
+          python -m app.scripts.bootstrap_db
+          python -m app.scripts.bootstrap_db   # idempotent (password rotation path)
+          RINGSAYS_MIGRATION_DATABASE_URL=postgresql+psycopg://ringsays_owner:$RINGSAYS_DB_PASSWORD_OWNER@127.0.0.1:5432/ringsays alembic upgrade head
+          test "$(psql -h 127.0.0.1 -U postgres -d ringsays -Atc "select count(*) from pg_roles where rolname like 'ringsays%' and (rolsuper or rolbypassrls)")" = 0
+          test "$(psql -h 127.0.0.1 -U postgres -d ringsays -Atc "select count(*) from pg_policies where policyname='system_roles'")" -ge 20
+
   typescript:
     runs-on: ubuntu-latest
     steps:
