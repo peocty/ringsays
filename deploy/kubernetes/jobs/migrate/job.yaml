@@ -28,8 +28,6 @@ spec:
           command: ["alembic", "upgrade", "head"]
           env:
             - { name: RINGSAYS_SETTINGS_DIR, value: /var/run/secrets/ringsays }
-            - name: RINGSAYS_ENVIRONMENT
-              valueFrom: { configMapKeyRef: { name: ringsays-config, key: RINGSAYS_ENVIRONMENT } }
           resources:
             requests: { cpu: 100m, memory: 256Mi }
             limits: { memory: 512Mi }

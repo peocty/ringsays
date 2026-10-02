@@ -1,0 +1,98 @@
+# Build, scan and deploy a release to a KSA environment. Images go to the environment's Artifact
+# Registry in me-central2 and are deployed by digest. Staging deploys on every tag; production waits
+# for approval (GitHub environment "ksa-production" with required reviewers).
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: ksa-staging or ksa-production
+        required: true
+        default: ksa-staging
+
+permissions:
+  contents: read
+  id-token: write # workload identity federation to Google Cloud (no keys)
+
+concurrency:
+  group: release-${{ inputs.environment || 'ksa-staging' }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'ksa-staging' }}
+    env:
+      ENVIRONMENT: ${{ inputs.environment || 'ksa-staging' }}
+      # Set per GitHub environment (from `tofu output ci` and `tofu output image_repository`).
+      WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
+      CI_SERVICE_ACCOUNT: ${{ vars.CI_SERVICE_ACCOUNT }}
+      REPOSITORY: ${{ vars.IMAGE_REPOSITORY }}
+      CLUSTER: ${{ vars.CLUSTER_NAME }}
+      PROJECT_ID: ${{ vars.PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.CI_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with: { install_components: gke-gcloud-auth-plugin,kubectl }
+      - run: gcloud auth configure-docker me-central2-docker.pkg.dev --quiet
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push API image
+        id: api
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          build-args: EXTRAS=gcp
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ env.REPOSITORY }}/api:${{ github.ref_name }}-${{ github.sha }}
+      - name: Build and push portal image
+        id: portal
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/portal/Dockerfile
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ env.REPOSITORY }}/portal:${{ github.ref_name }}-${{ github.sha }}
+
+      - name: Scan images (fail on fixable high and critical)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.REPOSITORY }}/api@${{ steps.api.outputs.digest }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.REPOSITORY }}/portal@${{ steps.portal.outputs.digest }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Tools
+        run: curl -sSL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.7.1/kustomize_v5.7.1_linux_amd64.tar.gz | sudo tar xz -C /usr/local/bin
+      - name: Pin digests
+        run: |
+          for d in deploy/kubernetes/overlays/$ENVIRONMENT deploy/kubernetes/jobs/migrate; do
+            (cd $d && kustomize edit set image ringsays/api=$REPOSITORY/api@${{ steps.api.outputs.digest }})
+          done
+          (cd deploy/kubernetes/overlays/$ENVIRONMENT && kustomize edit set image ringsays/portal=$REPOSITORY/portal@${{ steps.portal.outputs.digest }})
+      - name: Cluster credentials (IAM checked DNS endpoint)
+        run: gcloud container clusters get-credentials "$CLUSTER" --region me-central2 --project "$PROJECT_ID" --dns-endpoint
+      - name: Migrate, then roll out
+        run: deploy/scripts/release.sh "$ENVIRONMENT"
+      - name: Smoke test
+        run: |
+          host=$(grep '^DOMAIN=' deploy/kubernetes/overlays/$ENVIRONMENT/environment.env | cut -d= -f2)
+          curl -fsS --retry 10 --retry-delay 6 "https://api.$host/health"

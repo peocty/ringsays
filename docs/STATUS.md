@@ -270,6 +270,30 @@ browser tests: 12 portal, 6 app, 4 mock bank (console, app, API and webhooks tog
 Also found while capturing screenshots: suggested times included 01:00 (comment promised working hours,
 code did not check). Fixed in the shared client, so the RingSays app and the SDK both benefit.
 
+## Stage 8 (2026-10-02)
+
+| Area | Item | Status |
+| --- | --- | --- |
+| Database | No superuser, no BYPASSRLS: explicit policy for worker and back office (migration 0006) | Done, tested here (full suite and Mock Bank end to end on a server with a CREATEROLE only admin) |
+| Database | `bootstrap_db`: roles, passwords, ownership as a managed service admin | Done, tested here; CI job repeats it |
+| Runtime | Real client address behind load balancers (trusted proxies) | Done, tested here |
+| Runtime | Evidence storage on GCS (regional endpoint) and S3 compatible stores | Done, tested here with test doubles and moto; needs a real bucket check |
+| Runtime | `/ready` (database, Redis), worker heartbeat, secrets read from files | Done, tested here |
+| Runtime | Fix: outbox relay could never publish to a real NATS (no stream); now creates the stream, dedupes by outbox id, fails fast | Done, tested here against nats-server 2.11, single node and three node cluster |
+| Image | Hash locked dependencies, numeric non root user, app run from source | Lint clean (hadolint); 753 tests pass on Python 3.12 with the locks; image build runs in CI |
+| Kubernetes | Kustomize base, GCP Dammam component, generic component, staging and production overlays, jobs | Validated here: kubeconform strict with CRDs (164 resources), kube-linter clean, Checkov 520 passed |
+| Kubernetes | Production NATS cluster configuration | Verified on a real three node cluster (routes, meta leader, stream on three replicas) |
+| Terraform | Platform module, staging and production, state bootstrap (Google Cloud me-central2) | Checked here: fmt, tflint with Google ruleset, Checkov 120 passed; `tofu validate` and plan in CI (provider downloads blocked here) |
+| Release | Build, SBOM and provenance, Trivy, digest pinning, migrate then roll out, smoke test | Written; release script order tested with a recording kubectl; runs in CI |
+
+Test count: 753 backend tests (plus 3 against a real NATS server), unchanged frontend counts.
+
+Found while building stage 8, now fixed: outbox relay against real NATS (no stream, so nothing was ever
+published); NATS client retrying a refused server indefinitely and stalling the worker; production
+NATS routes would never authenticate (NATS does not expand variables inside URLs); every API request
+would have looked like it came from the load balancer, so the per address sign in code limit would
+have applied to the whole country; job manifests referenced a ConfigMap by a name overlays hash.
+
 ## Known gaps
 
 - Foundation doc section H transition table predates ADR 0004 refinements.
@@ -278,8 +302,8 @@ code did not check). Fixed in the shared client, so the RingSays app and the SDK
 - Consumer to consumer intents and Request to Talk are MVP 2.
 - A Context Token replayed through idempotency comes back null (shown once); a re-issue endpoint is needed.
 - Audit chain heads must be exported to write once storage by an operations job; export target not built.
-- Client status cache is per process (30 s); move to Redis when more than one API instance runs.
-- Python 3.11 used in build workspace; Dockerfile and CI use 3.12. Code targets 3.11 or later.
+- Client status cache is per process (30 s); revocations already go through Redis to every process.
+- Python 3.11 used in build workspace; Dockerfile and CI use 3.12 (suite also passes on 3.12 with the image locks).
 - Verification evidence is on local disk (MOCK object storage); production needs an S3 compatible store in region
   with encryption (settings refuse local storage in production).
 - Calling number checks against the operator caller name registry are manual (reviewer); no operator API yet.
@@ -287,7 +311,11 @@ code did not check). Fixed in the shared client, so the RingSays app and the SDK
 - Commercial registration and domain are not checked for duplicates across organisations; reviewer must check.
 - No four eyes rule yet: one reviewer can approve alone.
 - Portal Arabic needs native speaker review; server validation messages are English only.
-- nginx image and Docker Compose portal service not built or run here (no Docker daemon).
+- Container images not built here (registries blocked); CI builds and scans them.
+- Infrastructure never applied to a real Google Cloud project from here; first apply needs the organisation prerequisites in deploy/README.md.
+- Real SMS (KSA sender ID) and push adapters missing: production refuses MOCK, so production cannot sign anyone in yet.
+- Egress is any public address on 443; narrow to providers with an egress proxy or FQDN policies.
+- Disaster recovery outside the single Google Cloud KSA region needs a second provider in the Kingdom.
 - Staff sign in binding (first sign in of a seeded staff email) is logged, not in a tenant audit chain.
 - Toast messages inside an open dialog may not be announced by screen readers.
 - App and SDK not run on real iPhone or Android phones here; push providers are MOCK; app store builds (EAS) not made.

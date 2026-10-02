@@ -15,7 +15,8 @@ packages/client/    typed API client, device key and session (app and SDK)
 apps/mobile/        RingSays app (Expo, React Native), Arabic and English
 sdk/react-native/   enterprise SDK: show and answer intents inside a bank's own app
 examples/mock-bank/ fictional bank using the SDK: server, agent console, customer app
-infra/              Docker Compose for local; Helm and Terraform from stage 8
+infra/              Docker Compose for local development
+deploy/             Kingdom hosting: Terraform (Google Cloud Dammam), Kustomize, release scripts
 docs/adr/           architecture decision records
 docs/STATUS.md      what is done, mocked, or needs device testing
 ```
@@ -100,6 +101,12 @@ returned `context_token` to the bank app, render `<IntentCard token=… />`.
 
 A whole bank integration (fictional): `examples/mock-bank/README.md`. Quick start: `make bank-setup`,
 `make bank`, `make bank-app`, with the API and worker running.
+
+## Deploying
+
+See `deploy/README.md`: Google Cloud Dammam (me-central2) first, cloud neutral manifests for other KSA
+clouds, prerequisites, first deployment, release flow, verification checklist. `deploy/scripts/validate.sh`
+runs every check on deployment code.
 
 ## Rules for contributors
 

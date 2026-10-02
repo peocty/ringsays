@@ -37,6 +37,14 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -e ".[dev]"
+      - name: NATS JetStream for publisher tests
+        run: |
+          curl -sSL https://github.com/nats-io/nats-server/releases/download/v2.11.9/nats-server-v2.11.9-linux-amd64.tar.gz | tar xz --strip-components=1 -C /tmp nats-server-v2.11.9-linux-amd64/nats-server
+          /tmp/nats-server -js -p 4222 -sd /tmp/nats &
+      - name: Image dependency locks match pyproject
+        run: |
+          pip install uv
+          for e in gcp s3; do uv pip compile pyproject.toml --extra $e --python-version 3.12 --generate-hashes --quiet -o /tmp/$e.lock; sed -i '/^#/d' /tmp/$e.lock; sed '/^#/d' requirements/$e.lock | diff -q - /tmp/$e.lock; done
       - run: ruff check app tests
       - run: mypy
       - run: pytest
@@ -71,6 +79,39 @@ jobs:
           RINGSAYS_MIGRATION_DATABASE_URL=postgresql+psycopg://ringsays_owner:$RINGSAYS_DB_PASSWORD_OWNER@127.0.0.1:5432/ringsays alembic upgrade head
           test "$(psql -h 127.0.0.1 -U postgres -d ringsays -Atc "select count(*) from pg_roles where rolname like 'ringsays%' and (rolsuper or rolbypassrls)")" = 0
           test "$(psql -h 127.0.0.1 -U postgres -d ringsays -Atc "select count(*) from pg_policies where policyname='system_roles'")" -ge 20
+
+  # Deployment code: rendered manifests (schemas, kube-linter, Checkov), Terraform (fmt, tflint,
+  # Checkov, validate with providers).
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: opentofu/setup-opentofu@v1
+        with: { tofu_version: 1.10.6 }
+      - uses: terraform-linters/setup-tflint@v4
+        with: { tflint_version: v0.64.0 }
+      - name: Tools
+        run: |
+          pip install checkov==3.3.22
+          curl -sSL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.7.1/kustomize_v5.7.1_linux_amd64.tar.gz | tar xz -C /usr/local/bin
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar xz -C /usr/local/bin kubeconform
+          curl -sSL https://github.com/stackrox/kube-linter/releases/download/v0.7.6/kube-linter-linux.tar.gz | tar xz -C /usr/local/bin
+      - run: deploy/scripts/validate.sh
+      - name: tflint (Google ruleset)
+        working-directory: deploy/terraform
+        env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: |
+          tflint --init --config=$PWD/.tflint.hcl
+          for d in modules/platform environments/ksa-staging environments/ksa-production bootstrap; do tflint --chdir=$d --config=$PWD/.tflint.hcl; done
+      - name: tofu validate
+        working-directory: deploy/terraform
+        run: |
+          for d in environments/ksa-staging environments/ksa-production bootstrap; do
+            tofu -chdir=$d init -backend=false -input=false
+            tofu -chdir=$d validate
+          done
 
   typescript:
     runs-on: ubuntu-latest

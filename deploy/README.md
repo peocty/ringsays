@@ -1,0 +1,160 @@
+# Deploying RingSays in the Kingdom
+
+Primary target: **Google Cloud, Dammam region (me-central2)**, bought through CNTXT (Google's exclusive
+partner for KSA billing). Everything holding customer data stays in me-central2 and is encrypted with
+keys from the environment's own Cloud KMS. The Kubernetes manifests are cloud neutral; a second KSA
+cloud (Oracle Riyadh or Jeddah, Alibaba Cloud with stc, Huawei Cloud Riyadh, AWS Riyadh) needs only the
+generic component and its own Terraform.
+
+```text
+deploy/
+  terraform/bootstrap/            state bucket (CMEK, versioned), once per project
+  terraform/modules/platform/     network, GKE, Cloud SQL, Redis, storage, registry, secrets, edge, IAM, policies
+  terraform/environments/ksa-*/   staging and production roots
+  kubernetes/base/                workloads, network policies, external secrets (cloud neutral)
+  kubernetes/components/gcp-ksa/  regional Gateways, Cloud Armor, health checks, Secret Manager, workload identity
+  kubernetes/components/generic-ingress/  ingress-nginx and Vault style store for other clouds
+  kubernetes/overlays/ksa-*/      environment values (environment.env, config.env from Terraform)
+  kubernetes/jobs/                migrate (every release), bootstrap (once, and after password rotation)
+  scripts/validate.sh             every check CI runs on deployment code
+  scripts/environment-from-terraform.sh   Terraform outputs to overlay values
+  scripts/release.sh              prerequisites, migrations, rollout, in that order
+```
+
+## Architecture
+
+| Layer | Google Cloud service | Settings that matter |
+| --- | --- | --- |
+| Edge | Regional external Application Load Balancer (GKE Gateway `gke-l7-regional-external-managed`) | Global load balancing is not allowed under the KSA data boundary; regional Cloud Armor with OWASP rules |
+| Back office edge | Regional internal Application Load Balancer (`gke-l7-rilb`) | Reachable from the VPC only (operations VPN or Interconnect) |
+| Compute | GKE Autopilot, three zones | Private nodes, private endpoint plus IAM checked DNS endpoint, Dataplane V2 network policies, KMS encrypted Kubernetes secrets, binary authorization (own registry only) |
+| Database | Cloud SQL PostgreSQL 16, regional HA in production | Private IP only, TLS (verify CA), CMEK, PITR 7 days, backups 35 days, pgAudit (DDL and roles), no statement logging |
+| Cache | Memorystore for Redis 7.2, Standard HA in production | AUTH, TLS, CMEK; holds counters and revocation lists only |
+| Events | NATS JetStream in cluster (1 node staging, 3 nodes production) | Password auth, file storage, stream on 3 replicas in production |
+| Evidence | Cloud Storage, me-central2 | CMEK, uniform access, public access prevention, versioning, soft delete 30 days, regional endpoint |
+| Secrets | Secret Manager regional secrets, me-central2 | CMEK; External Secrets Operator copies them into per workload Kubernetes secrets, mounted as files |
+| Images | Artifact Registry, me-central2 | Immutable tags, deploy by digest, scanned Docker Hub mirror for NATS |
+| Egress | Cloud NAT with two fixed addresses | Organisations can allow list RingSays for webhooks |
+| Identity | Workload identity per workload, GitHub federation for CI | No service account keys anywhere (org policy forbids them) |
+
+Database roles: none is superuser, none has BYPASSRLS (migration 0006). The worker and back office
+cross tenants through an explicit `system_roles` policy; the API role is limited to tenant and own
+row policies. CI proves this on every push by bootstrapping as a CREATEROLE admin (`managed-postgres` job).
+
+## Prerequisites (organisation administrator, once)
+
+1. Google Cloud organisation and billing through CNTXT (KSA billing address).
+2. Folder under **Assured Workloads, KSA data boundary** (with Access Justifications); create both
+   environment projects inside it, for example `ringsays-ksa-staging` and `ringsays-ksa-production`.
+3. Organisation log storage location `me-central2`, before the projects exist, so `_Default` and
+   `_Required` log buckets are created in the Kingdom:
+   `gcloud logging settings update --organization=ORG_ID --storage-location=me-central2`
+4. Grant the platform team `roles/orgpolicy.policyAdmin` on the projects (Terraform sets project policies).
+5. DNS: public zone for the domain (for example `ringsays.sa`), and certificates (see TLS below).
+
+## First deployment of an environment
+
+```bash
+# 1. State bucket (local state, once)
+tofu -chdir=deploy/terraform/bootstrap init
+tofu -chdir=deploy/terraform/bootstrap apply -var project_id=ringsays-ksa-staging \
+  -var 'state_admins=["group:ringsays-platform@peocit.com"]'
+# copy the output into environments/ksa-staging/backend.hcl
+
+# 2. Platform
+cp deploy/terraform/environments/ksa-staging/terraform.tfvars.example deploy/terraform/environments/ksa-staging/terraform.tfvars
+tofu -chdir=deploy/terraform/environments/ksa-staging init -backend-config=backend.hcl
+tofu -chdir=deploy/terraform/environments/ksa-staging apply
+
+# 3. Overlay values from outputs, then commit them
+deploy/scripts/environment-from-terraform.sh ksa-staging
+
+# 4. Cluster add ons (platform team): External Secrets Operator in namespace external-secrets,
+#    its service account annotated with `tofu output external_secrets_service_account`.
+#    cert-manager if certificates are issued in cluster.
+
+# 5. Database roles (once; again after a password rotation). Needs one pushed API image (run the
+#    release workflow's build once, or build and push by hand), pinned by digest:
+deploy/scripts/release.sh ksa-staging prerequisites            # namespace, identities, secrets only
+(cd deploy/kubernetes/jobs/bootstrap && kustomize edit set image ringsays/api=<repository>/api@sha256:<digest>)
+kustomize build deploy/kubernetes/jobs/bootstrap | kubectl apply -f -
+kubectl -n ringsays wait --for=condition=complete job/ringsays-db-bootstrap --timeout=300s
+kustomize build deploy/kubernetes/jobs/bootstrap | kubectl delete -f -     # admin credential leaves the cluster
+
+# 6. GitHub environment "ksa-staging": variables WIF_PROVIDER, CI_SERVICE_ACCOUNT (tofu output ci),
+#    IMAGE_REPOSITORY, CLUSTER_NAME, PROJECT_ID. Production: same, plus required reviewers.
+
+# 7. Release: push a tag v0.x.y (staging), or run the release workflow for production.
+```
+
+### TLS
+
+Gateways read `ringsays-public-tls` and `ringsays-internal-tls` Kubernetes secrets. Either cert-manager
+issues them (DNS 01 against Cloud DNS), or the bank's required certificate authority issues them and the
+platform team stores them in Secret Manager (`ringsays-public-tls` as an ExternalSecret of type
+kubernetes.io/tls). Banks often require a specific CA for anything they integrate with; ask early.
+
+## Every release
+
+`.github/workflows/release.yml`: build both images (API with the GCP extra), push to the
+environment's registry, SBOM and provenance, Trivy scan (fails on fixable high or critical), pin
+digests, then `deploy/scripts/release.sh`:
+
+1. prerequisites only (namespace, identities, config, secret store and external secrets, network policies)
+2. migration job as `ringsays_owner`, to completion; if it fails nothing else changes
+3. everything else, then wait for each rollout; smoke test `/health`
+
+Migrations must stay backward compatible with the running version (expand, then contract in a later release).
+
+## Verification checklist after the first deployment
+
+| Check | How |
+| --- | --- |
+| Regional storage endpoint works through private access | `kubectl -n ringsays exec deploy/ringsays-api -- python -c "from app.platform import blobs; s=blobs.get_store(); k=s.put(b'%PDF-x'); s.delete(k); print('ok')"` |
+| Database TLS and roles | API `/ready` is 200; `psql` as admin: `select rolname, rolsuper, rolbypassrls from pg_roles where rolname like 'ringsays%'` all false |
+| Real client address behind the load balancer | Sign in code requests from two phones count separately (per address limit) |
+| Network policies | From the portal pod, `curl` to the database address must time out |
+| Webhooks egress from fixed addresses | Point a test endpoint at a request bin; source address is one of `tofu output egress_addresses` |
+| NATS cluster (production) | `kubectl -n ringsays exec ringsays-nats-0 -- wget -qO- localhost:8222/jsz` shows `meta_cluster` with 3 peers |
+| Back office not public | `curl https://backoffice-api.<internal domain>` from the internet fails to resolve or connect |
+| No local tools at the edge | `curl -I https://api.<domain>/dev/oidc/.well-known/openid-configuration` redirects to the portal |
+
+## Operations
+
+- **Backups and recovery:** Cloud SQL automated backups (35 days production) and point in time
+  recovery (7 days of logs). Restore into a new instance, run `bootstrap_db` against it, repoint the
+  `ringsays-db-url-*` secrets. Evidence bucket keeps versions and soft deleted objects for 30 days.
+- **Disaster recovery:** Google Cloud has one region in the Kingdom; production spans its three zones.
+  A second region inside the Kingdom means a second provider (Oracle Jeddah and Riyadh have two
+  regions). Plan: nightly logical export to that provider's object storage, encrypted, kept in the Kingdom.
+- **Secret rotation:** taint the `random_password` (or `random_bytes`) resource, apply, rerun the
+  bootstrap job for database passwords, then `kubectl rollout restart` the workloads. External Secrets
+  refreshes every hour.
+- **Scaling:** API autoscales on CPU (3 to 20 in production). Worker replicas are safe to raise
+  (leases, SKIP LOCKED). Cloud SQL tier and Redis size are Terraform variables.
+- **Maintenance windows:** Friday 03:00 to 07:00 Riyadh for GKE, Cloud SQL and Redis (Kingdom weekend).
+
+## Not yet in place
+
+- Real SMS (KSA sender ID, for example Unifonic or Taqnyat) and push (APNs, FCM) adapters: production
+  refuses MOCK adapters, so production cannot sign anyone in until they exist. Staging runs with MOCK.
+- Egress is any public address on 443; narrow to the provider list with an egress proxy or FQDN
+  policies once SMS, push and identity providers are fixed.
+- Asymmetric token signing with a KMS held key (HS256 shared secret today).
+- Google Groups for GKE RBAC (`authenticator_groups_config`) once the platform team's group exists.
+- Nothing here has been applied to a real project from this workspace: provider downloads, container
+  registries and image builds are blocked here. CI runs `tofu validate`, builds the images and can plan.
+
+## Other KSA clouds
+
+| Need | Google Cloud (here) | Oracle Cloud | Alibaba Cloud (stc) | AWS Riyadh |
+| --- | --- | --- | --- | --- |
+| Kubernetes | GKE Autopilot | OKE | ACK | EKS |
+| PostgreSQL | Cloud SQL | OCI Database with PostgreSQL | ApsaraDB RDS PostgreSQL | RDS PostgreSQL |
+| Redis | Memorystore | OCI Cache | Tair or ApsaraDB Redis | ElastiCache |
+| Object storage | GCS (`RINGSAYS_BLOB_BACKEND=gcs`) | Object Storage S3 API (`s3`) | OSS S3 API (`s3`) | S3 (`s3`) |
+| Secrets | Secret Manager | OCI Vault | KMS Secrets Manager | Secrets Manager |
+| Edge | Gateway (regional ALB), Cloud Armor | OCI LB, WAF | ALB, WAF | ALB, AWS WAF |
+| Manifests | `components/gcp-ksa` | `components/generic-ingress` | `components/generic-ingress` | `components/generic-ingress` |
+
+The database setup is the same everywhere: `bootstrap_db` as the service's admin user, then migrations.
