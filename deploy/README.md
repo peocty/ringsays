@@ -124,6 +124,8 @@ Migrations must stay backward compatible with the running version (expand, then 
 | Webhooks egress from fixed addresses | Point a test endpoint at a request bin; source address is one of `tofu output egress_addresses` |
 | NATS cluster (production) | `kubectl -n ringsays exec ringsays-nats-0 -- wget -qO- localhost:8222/jsz` shows `meta_cluster` with 3 peers |
 | Back office not public | `curl https://backoffice-api.<internal domain>` from the internet fails to resolve or connect |
+| Real SMS | Request a code for a staff test number; it arrives from the registered sender name; API log shows `sms sent provider=...` with no number |
+| Real push | Send a test intent to a staff phone with the app; notification shows the fixed bilingual text only |
 | No local tools at the edge | `curl -I https://api.<domain>/dev/oidc/.well-known/openid-configuration` redirects to the portal |
 
 ## Operations
@@ -144,10 +146,41 @@ Migrations must stay backward compatible with the running version (expand, then 
 - **Erasure:** evidence deleted through the portal is gone from the bucket at once and from soft delete
   after 7 days; database backups age out after 35 days (production).
 
+## Real providers (production)
+
+Production sends sign in codes by SMS and intent notifications by push; staging keeps MOCK (codes in
+the API log). The API refuses to start in production with MOCK, or with real providers half configured.
+
+| What | Where | Who |
+| --- | --- | --- |
+| SMS provider and sender name | `kubernetes/overlays/ksa-production/providers.env`: `RINGSAYS_SMS_PROVIDER` (`taqnyat` or `unifonic`), `RINGSAYS_SMS_SENDER_ID` | PEOCIT, after CST registers the sender name |
+| SMS credential | Secret Manager `ringsays-sms-api-key`: Taqnyat bearer token, or Unifonic AppSid | Holder of the provider account |
+| Firebase project | `firebase_project_id` in `environments/ksa-production/terraform.tfvars`; OpenTofu grants the API and worker identities the messaging role there (no key file) | Platform team |
+| Apple key id, team, topic | `providers.env`: `RINGSAYS_APNS_KEY_ID`, `RINGSAYS_APNS_TEAM_ID`, `RINGSAYS_APNS_TOPIC` (the app bundle id) | PEOCIT Apple developer account owner |
+| Apple signing key | Secret Manager `ringsays-apns-private-key`: the whole `.p8` file | Same |
+
+OpenTofu (`real_providers = true`) creates both secrets empty and CMEK encrypted, so the values never
+pass through state. Add them once, then release:
+
+```sh
+gcloud secrets versions add ringsays-sms-api-key --location=me-central2 --data-file=- <<< "$TOKEN"
+gcloud secrets versions add ringsays-apns-private-key --location=me-central2 --data-file=AuthKey_XXXX.p8
+```
+
+`release.sh` refuses to release while `providers.env` still has `REPLACE_` values. A provider outage
+shows as `503 sms_unavailable` on code requests (no provider detail reaches the caller) and as failed
+push attempts on the intent, after which delivery falls back as the policy allows. Logs carry only the
+provider name and message id, never the number or the code.
+
+Data: an SMS carries the code and the bank neutral text; a push carries the intent id and its kind with
+a fixed bilingual text, so nothing about the customer or the caller passes through Google or Apple.
+Taqnyat and Unifonic are Saudi providers. Changing provider is one setting and one secret.
+
 ## Not yet in place
 
-- Real SMS (KSA sender ID, for example Unifonic or Taqnyat) and push (APNs, FCM) adapters: production
-  refuses MOCK adapters, so production cannot sign anyone in until they exist. Staging runs with MOCK.
+- Provider accounts themselves (CST sender registration, Taqnyat or Unifonic contract, Apple and Firebase
+  app registrations): the adapters are built and tested against each provider's documented API, not yet
+  against a live account.
 - Egress is any public address on 443; narrow to the provider list with an egress proxy or FQDN
   policies once SMS, push and identity providers are fixed.
 - Asymmetric token signing with a KMS held key (HS256 shared secret today).

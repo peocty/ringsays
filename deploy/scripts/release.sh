@@ -18,8 +18,8 @@ if [ "$mode" = release ] && grep -q REPLACED_BY_PIPELINE "$overlay/kustomization
 fi
 
 kustomize build "$overlay" > "$rendered"
-if [ "$mode" = release ] && grep -n 'ringsays\.example' "$rendered"; then
-  echo "example values still in the overlay: run environment-from-terraform.sh and edit identity.env" >&2
+if [ "$mode" = release ] && grep -nE 'ringsays\.example|: REPLACE_[A-Z]' "$rendered"; then
+  echo "example values still in the overlay: run environment-from-terraform.sh and edit identity.env (and providers.env)" >&2
   exit 2
 fi
 

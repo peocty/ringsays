@@ -19,7 +19,7 @@ for j in "$here"/kubernetes/jobs/*/; do
 done
 
 # Placeholders must never reach a rendered GCP overlay.
-if grep -nE '192\.0\.2\.|PROJECT_ID|GSA_DOMAIN|PUBLIC_ADDRESS_NAME|SECURITY_POLICY|\*\.DOMAIN' "$out"/ksa-*.yaml; then
+if grep -nE '192\.0\.2\.|[^_]PROJECT_ID|GSA_DOMAIN|PUBLIC_ADDRESS_NAME|SECURITY_POLICY|\*\.DOMAIN' "$out"/ksa-*.yaml; then
   echo "unreplaced placeholder in a KSA overlay" >&2
   exit 1
 fi

@@ -18,10 +18,12 @@ from app.modules.client.directory import DbRecipientDirectory
 from app.modules.delivery import adapters
 from app.modules.intent import api as intent_api
 from app.platform import ratelimit
+from app.platform.providers import wiring as providers
 
 settings.assert_safe_for_environment()
 # Recipient directory is RingSays' own database (not an external integration), so it is always real.
 adapters.configure(directory=DbRecipientDirectory())
+providers.install()  # real SMS and push unless MOCK adapters
 
 app = FastAPI(title="RingSays API", version="0.1.0")
 problems.install(app)

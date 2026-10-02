@@ -50,3 +50,22 @@ def test_logout_revokes_device_tokens_and_push(client: TestClient) -> None:
 
 def test_logout_requires_access_token(client: TestClient) -> None:
     assert client.post("/v1/auth/logout").status_code == 401
+
+
+def test_sms_provider_failure_is_503_without_details(client: TestClient) -> None:
+    from app.modules.identity import service as identity
+    from app.platform.providers.sms import SmsSendFailed
+
+    class Down:
+        def send(self, phone: str, message: str) -> None:
+            raise SmsSendFailed("taqnyat refused: HTTP 400")
+
+    previous = identity.get_sms()
+    identity.configure_sms(Down())
+    try:
+        r = client.post("/v1/auth/otp", json={"phone": _phone(), "locale": "ar"})
+    finally:
+        identity.configure_sms(previous)
+    assert r.status_code == 503
+    assert r.json()["code"] == "sms_unavailable"
+    assert "taqnyat" not in r.text

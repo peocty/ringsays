@@ -21,7 +21,7 @@ output "kubernetes_environment" {
 
 # Settings for the RingSays containers that come from infrastructure (overlay config.env).
 output "ringsays_config" {
-  value = {
+  value = merge({
     RINGSAYS_JWT_ISSUER           = "https://api.${var.domain}"
     RINGSAYS_PORTAL_ORIGINS       = jsonencode(["https://portal.${var.domain}"])
     RINGSAYS_PORTAL_REDIRECT_URIS = jsonencode(["https://portal.${var.domain}/auth/callback"])
@@ -29,7 +29,7 @@ output "ringsays_config" {
     RINGSAYS_BLOB_ENDPOINT        = "https://storage.${var.region}.rep.googleapis.com"
     # Google appends "<client>, <load balancer address>": proxies subnet and both gateway addresses.
     RINGSAYS_TRUSTED_PROXIES = jsonencode([local.ranges.proxy, "${google_compute_address.public.address}/32", "${google_compute_address.internal.address}/32"])
-  }
+  }, var.real_providers ? { RINGSAYS_FCM_PROJECT_ID = var.firebase_project_id } : {})
 }
 
 output "portal_config" {

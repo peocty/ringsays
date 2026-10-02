@@ -22,6 +22,7 @@ from app.modules.delivery import service as delivery
 from app.modules.intent import jobs
 from app.modules.webhooks import service as webhooks
 from app.platform import outbox
+from app.platform.providers import wiring as providers
 
 log = logging.getLogger("ringsays.worker")
 TICK_S = 2.0
@@ -88,6 +89,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     settings.assert_safe_for_environment()
     adapters.configure(directory=DbRecipientDirectory())
+    providers.install()  # real SMS and push unless MOCK adapters
     if settings.use_mock_adapters:
         log.warning("worker running with MOCK push, broker and webhook sender")
         publisher: outbox.Publisher = outbox.MockPublisher()

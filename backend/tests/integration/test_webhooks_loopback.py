@@ -83,7 +83,7 @@ def test_http_origins_refused_outside_local() -> None:
         admin_oidc_issuer="https://idp.example",
         staff_oidc_issuer="https://staff.example",
         backoffice_enabled=False,
-        use_mock_adapters=False,
+        use_mock_adapters=True,
     )
     with pytest.raises(RuntimeError, match="PORTAL_ORIGINS"):
         s.assert_safe_for_environment()

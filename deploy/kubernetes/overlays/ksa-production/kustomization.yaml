@@ -7,6 +7,7 @@ resources:
   - ../../base
 components:
   - ../../components/gcp-ksa
+  - ../../components/real-providers
 configMapGenerator:
   - name: ringsays-environment
     envs: [environment.env]
@@ -14,7 +15,7 @@ configMapGenerator:
       annotations: { config.kubernetes.io/local-config: "true" }
   - name: ringsays-config
     behavior: merge
-    envs: [config.env, identity.env]
+    envs: [config.env, identity.env, providers.env]
     literals:
       - RINGSAYS_ENVIRONMENT=production
       - RINGSAYS_USE_MOCK_ADAPTERS=false

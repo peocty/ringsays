@@ -34,6 +34,7 @@ from app.core.phone import encrypt_phone, phone_hash
 from app.core.tables import devices, otp_challenges, refresh_tokens, users
 from app.modules.intent.errors import IntentError, RuleViolation
 from app.platform import ratelimit
+from app.platform.providers.sms import SmsSendFailed
 
 log = logging.getLogger(__name__)
 OTP_TTL = timedelta(minutes=5)
@@ -51,6 +52,11 @@ class AuthFailed(IntentError):
 
 
 # SMS
+
+
+class SmsUnavailable(IntentError):
+    code = "sms_unavailable"
+    http_status = 503
 
 
 class SmsSender(Protocol):
@@ -121,7 +127,11 @@ def request_otp(phone: str, locale: str, now: datetime) -> UUID:
         if locale == "ar"
         else f"RingSays code: {code} . Never share it with anyone"
     )
-    get_sms().send(phone, message)
+    try:
+        get_sms().send(phone, message)
+    except SmsSendFailed as exc:
+        log.warning("sign in code not sent: %s", exc)  # provider reason only, never number or code
+        raise SmsUnavailable("The code could not be sent just now. Try again in a minute.") from exc
     return challenge_id
 
 

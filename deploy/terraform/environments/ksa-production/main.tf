@@ -41,6 +41,10 @@ variable "alert_email" {
   type = string
 }
 
+variable "firebase_project_id" {
+  type = string
+}
+
 module "platform" {
   source              = "../../modules/platform"
   project_id          = var.project_id
@@ -54,6 +58,8 @@ module "platform" {
   database_tier       = "db-custom-4-15360"
   redis_memory_gb     = 5
   deletion_protection = true
+  real_providers      = true
+  firebase_project_id = var.firebase_project_id
 }
 
 output "kubernetes_environment" {

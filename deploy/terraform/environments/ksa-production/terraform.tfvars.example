@@ -4,3 +4,4 @@ domain            = "ringsays.sa"
 ops_cidrs         = ["10.250.0.0/24"] # operations VPN or Interconnect range
 github_repository = "peocit/ringsays"
 alert_email       = "ringsays-ops@peocit.com"
+firebase_project_id = "peocit-ringsays"

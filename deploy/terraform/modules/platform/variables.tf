@@ -70,3 +70,19 @@ variable "deletion_protection" {
   type        = bool
   default     = true
 }
+
+variable "real_providers" {
+  description = "Real SMS and push providers (production). Creates the empty provider secrets and the Firebase permission."
+  type        = bool
+  default     = false
+}
+
+variable "firebase_project_id" {
+  description = "Firebase project that owns the RingSays app registrations (Android and iOS). Needed when real_providers is true."
+  type        = string
+  default     = ""
+  validation {
+    condition     = !var.real_providers || var.firebase_project_id != ""
+    error_message = "firebase_project_id is required when real_providers is true."
+  }
+}

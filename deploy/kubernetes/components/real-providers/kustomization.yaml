@@ -1,0 +1,16 @@
+# Real SMS and push providers (production). Adds the two provider credentials to the API's and the
+# worker's secrets; both send one time codes or push notifications, nothing else does. The values are
+# put into Secret Manager by hand (deploy/README.md, "Real providers"); OpenTofu creates the empty,
+# CMEK encrypted secrets and the read permission when real_providers = true. Non secret settings
+# (provider, sender name, Apple key id, team and topic) are in the overlay's providers.env.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - target: { kind: ExternalSecret, name: ringsays-(api|worker)-secrets }
+    patch: |-
+      - op: add
+        path: /spec/data/-
+        value: { secretKey: RINGSAYS_SMS_API_KEY, remoteRef: { key: ringsays-sms-api-key } }
+      - op: add
+        path: /spec/data/-
+        value: { secretKey: RINGSAYS_APNS_PRIVATE_KEY, remoteRef: { key: ringsays-apns-private-key } }

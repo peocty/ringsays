@@ -40,6 +40,18 @@ class Settings(BaseSettings):
     nats_stream_max_age_days: int = 7
     use_mock_adapters: bool = True
 
+    # Real providers (used when use_mock_adapters is false). SMS: a provider with a CST registered
+    # sender ID in the Kingdom. Push: Firebase project for Android, APNs signing key for iOS.
+    sms_provider: str = "mock"  # mock | taqnyat | unifonic
+    sms_sender_id: str = ""
+    sms_api_key: str = ""  # Taqnyat bearer token or Unifonic AppSid (secret)
+    fcm_project_id: str = ""
+    apns_key_id: str = ""
+    apns_team_id: str = ""
+    apns_private_key: str = ""  # .p8 contents (secret)
+    apns_topic: str = "com.peocit.ringsays"
+    apns_sandbox: bool = False
+
     # Local tokens use HS256 with a static secret. Production must use an asymmetric key held in KMS.
     jwt_secret: str = LOCAL_JWT_SECRET
     jwt_issuer: str = "https://auth.ringsays.local"
@@ -136,6 +148,26 @@ class Settings(BaseSettings):
             raise RuntimeError("RINGSAYS_BACKOFFICE_DATABASE_URL must be set when back office is enabled")
         if self.environment == "production" and self.use_mock_adapters:
             raise RuntimeError("mock adapters are not allowed in production")
+        if not self.use_mock_adapters:
+            missing = [
+                name
+                for name, ok in [
+                    (
+                        "RINGSAYS_SMS_PROVIDER (taqnyat or unifonic)",
+                        self.sms_provider in ("taqnyat", "unifonic"),
+                    ),
+                    ("RINGSAYS_SMS_SENDER_ID", bool(self.sms_sender_id)),
+                    ("RINGSAYS_SMS_API_KEY", bool(self.sms_api_key)),
+                    ("RINGSAYS_FCM_PROJECT_ID", bool(self.fcm_project_id)),
+                    (
+                        "RINGSAYS_APNS_KEY_ID, _TEAM_ID, _PRIVATE_KEY",
+                        bool(self.apns_key_id and self.apns_team_id and self.apns_private_key),
+                    ),
+                ]
+                if not ok
+            ]
+            if missing:
+                raise RuntimeError(f"real providers not configured: {', '.join(missing)}")
         insecure = [o for o in self.portal_origins if not o.startswith("https://")]
         if insecure:
             raise RuntimeError(f"RINGSAYS_PORTAL_ORIGINS must be https outside local: {insecure}")
