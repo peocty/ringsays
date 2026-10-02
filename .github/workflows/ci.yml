@@ -29,6 +29,10 @@ jobs:
         env: { POSTGRES_PASSWORD: postgres }
         ports: ["5432:5432"]
         options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+      # Sign in code limits fail closed without Redis (every OTP request would be 503).
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
     env:
       RINGSAYS_TEST_PG_ADMIN_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres
       RINGSAYS_ENVIRONMENT: local
@@ -159,11 +163,12 @@ jobs:
         # Every app sign in comes from one address here; lift the per address code limit for tests.
         run: cd backend && RINGSAYS_OTP_PER_IP_PER_HOUR=100000 nohup .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 > ../api.log 2>&1 &
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @ringsays/portal build
+      # Workspace libraries ship as built dist (not committed): build them with each app ("..." = with dependencies).
+      - run: pnpm --filter "@ringsays/portal..." build
       - run: pnpm --filter @ringsays/portal exec playwright install --with-deps chromium
       - run: pnpm --filter @ringsays/portal e2e
       - name: Mobile app web build (MOCK push token so MOCK push delivers to the browser)
-        run: pnpm --filter @ringsays/client build && pnpm --filter @ringsays/mobile export:web
+        run: pnpm --filter "@ringsays/client..." build && pnpm --filter @ringsays/mobile export:web
         env:
           EXPO_PUBLIC_RINGSAYS_API_BASE: http://127.0.0.1:8000
           EXPO_PUBLIC_RINGSAYS_PREVIEW_PUSH_TOKEN: mock-web
@@ -171,8 +176,8 @@ jobs:
         env: { E2E_PYTHON: "${{ github.workspace }}/backend/.venv/bin/python" }
       - name: Mock bank (SDK sample) server and app web build
         run: |
-          pnpm --filter @ringsays/react-native-sdk build
-          pnpm --filter @mockbank/server build
+          pnpm --filter "@ringsays/react-native-sdk..." build
+          pnpm --filter "@mockbank/server..." build
           pnpm --filter @mockbank/app export:web
       - run: pnpm --filter @mockbank/app e2e
         env:
@@ -195,5 +200,5 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: gitleaks/gitleaks-action@v2
         env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with: { scan-type: fs, severity: "HIGH,CRITICAL", exit-code: "1" }
