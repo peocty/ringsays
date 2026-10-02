@@ -14,7 +14,8 @@ export default defineConfig({
   timeout: 90_000,
   expect: { timeout: 15_000 },
   workers: 1,
-  reporter: [["list"]],
+  // On GitHub, failures also become annotations (readable without downloading logs).
+  reporter: process.env.CI ? [["github"], ["list"]] : [["list"]],
   globalSetup: "./e2e/global-setup.ts",
   use: {
     baseURL: "http://127.0.0.1:8081",

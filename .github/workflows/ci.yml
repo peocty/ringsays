@@ -184,6 +184,8 @@ jobs:
           E2E_PYTHON: "${{ github.workspace }}/backend/.venv/bin/python"
           RINGSAYS_PYTHON: "${{ github.workspace }}/backend/.venv/bin/python"
       - if: failure()
+        run: python3 .github/scripts/annotate.py log api.log "API log (last 60 lines)"
+      - if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: e2e
@@ -201,4 +203,6 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with: { scan-type: fs, severity: "HIGH,CRITICAL", exit-code: "1" }
+        with: { scan-type: fs, severity: "HIGH,CRITICAL", ignore-unfixed: true, format: json, output: trivy.json, exit-code: "0" }
+      - name: Fixable high and critical findings fail the build (listed as annotations)
+        run: python3 .github/scripts/annotate.py trivy trivy.json

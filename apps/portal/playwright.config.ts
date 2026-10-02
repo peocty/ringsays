@@ -15,7 +15,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,
-  reporter: [["list"]],
+  // On GitHub, failures also become annotations (readable without downloading logs).
+  reporter: process.env.CI ? [["github"], ["list"]] : [["list"]],
   globalSetup: "./e2e/global-setup.ts",
   use: {
     baseURL: "http://127.0.0.1:4173",
