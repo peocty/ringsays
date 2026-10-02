@@ -77,10 +77,18 @@ class Settings(BaseSettings):
         "http://localhost:4173/auth/callback",
         "http://127.0.0.1:4173/auth/callback",
     ]
+    # CIDRs of load balancer proxies whose X-Forwarded-For is believed (GKE: the proxy only subnet).
+    trusted_proxies: list[str] = []
     # Verification evidence. Local: files on disk (MOCK object storage). Production: S3 compatible
     # storage in region with server side encryption.
-    blob_backend: str = "local"
+    blob_backend: str = "local"  # local (MOCK) | gcs | s3
     blob_dir: str = ".local/blobs"
+    blob_bucket: str = ""
+    blob_prefix: str = "evidence/"
+    # GCS: regional endpoint keeps data in Kingdom (https://storage.me-central2.rep.googleapis.com).
+    # S3 compatible (OCI, Alibaba, AWS): endpoint URL and region of the in Kingdom bucket.
+    blob_endpoint: str | None = None
+    blob_region: str | None = None
     api_clients_max_active: int = 10
     webhook_endpoints_max_active: int = 5
     invite_ttl_days: int = 14
@@ -116,6 +124,8 @@ class Settings(BaseSettings):
             raise RuntimeError("RINGSAYS_ADMIN_OIDC_ISSUER and RINGSAYS_STAFF_OIDC_ISSUER must be set")
         if self.environment == "production" and self.blob_backend == "local":
             raise RuntimeError("RINGSAYS_BLOB_BACKEND must be object storage in production, not local disk")
+        if self.blob_backend in ("gcs", "s3") and not self.blob_bucket:
+            raise RuntimeError("RINGSAYS_BLOB_BUCKET must be set for object storage")
         if self.backoffice_enabled and LOCAL_BACKOFFICE_PASSWORD in self.backoffice_database_url:
             raise RuntimeError("RINGSAYS_BACKOFFICE_DATABASE_URL must be set when back office is enabled")
         if self.environment == "production" and self.use_mock_adapters:

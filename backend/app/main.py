@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
-from app.core import auth, problems
+from app.core import auth, db, problems
 from app.core.config import settings
 from app.core.limits import RequestLimits
+from app.core.proxy import TrustedProxyMiddleware
 from app.modules.admin import api as admin_api
 from app.modules.admin import backoffice_api
 from app.modules.client import api as client_api
 from app.modules.client.directory import DbRecipientDirectory
 from app.modules.delivery import adapters
 from app.modules.intent import api as intent_api
+from app.platform import ratelimit
 
 settings.assert_safe_for_environment()
 # Recipient directory is RingSays' own database (not an external integration), so it is always real.
@@ -54,6 +58,27 @@ app.add_middleware(
 )
 # Outermost: limits apply before CORS, routing, authentication and body parsing.
 app.add_middleware(RequestLimits)
+# Before anything reads the client address: real client behind trusted load balancers only.
+app.add_middleware(TrustedProxyMiddleware, trusted=settings.trusted_proxies)
+
+
+@app.get("/ready", tags=["Ops"], include_in_schema=False)
+def ready() -> JSONResponse:
+    """Readiness: this process can reach its database and Redis. Liveness stays /health (no I/O)."""
+    checks: dict[str, str] = {}
+    try:
+        with db.get_engine().connect() as c:
+            c.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception:
+        checks["database"] = "unavailable"
+    try:
+        ratelimit.get_limiter().ping()
+        checks["redis"] = "ok"
+    except Exception:
+        checks["redis"] = "unavailable"
+    ok = all(v == "ok" for v in checks.values())
+    return JSONResponse({"status": "ok" if ok else "unavailable", **checks}, status_code=200 if ok else 503)
 
 
 @app.get("/health", tags=["Ops"])

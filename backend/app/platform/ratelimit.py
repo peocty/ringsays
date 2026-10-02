@@ -78,6 +78,10 @@ def _until_midnight_utc(now: datetime) -> int:
 
 
 class Limiter:
+    def ping(self) -> None:
+        """Raises when Redis is unreachable (readiness probe)."""
+        self._r.ping()
+
     def __init__(self, client: redis.Redis) -> None:
         self._r = client
         self._script = client.register_script(_SCRIPT)

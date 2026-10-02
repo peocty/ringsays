@@ -21,6 +21,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Object storage for verification evidence (pick the one the cloud provides).
+gcp = ["google-cloud-storage>=2.18,<4"]
+s3 = ["boto3>=1.35,<2"]
 dev = [
   "pytest>=8.3",
   "httpx>=0.27",
@@ -30,6 +33,9 @@ dev = [
   "ruff>=0.6",
   "mypy>=1.11",
   "types-PyYAML>=6.0",
+  "moto[s3]>=5.0,<6",
+  "google-cloud-storage>=2.18,<4",
+  "boto3>=1.35,<2",
 ]
 
 [build-system]
@@ -56,3 +62,9 @@ ignore = ["S101"]
 python_version = "3.11"
 strict = true
 packages = ["app"]
+
+[[tool.mypy.overrides]]
+# Cloud SDKs without type information (optional extras).
+module = ["google.cloud", "google.cloud.*", "boto3", "boto3.*", "moto", "moto.*"]
+ignore_missing_imports = true
+follow_untyped_imports = false
