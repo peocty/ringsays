@@ -21,8 +21,12 @@ Apple (APNs) for iOS; no in Kingdom alternative reaches stock phones.
 - **Push by platform.** FCM HTTP v1 with the workload's own Google identity (no key file); APNs over
   HTTP/2 with a token signing key (.p8), JWT reused 40 minutes, one long lived connection per process
   as Apple asks. A device token that is not hex is refused before it reaches the URL.
-- **Minimal payload.** A push carries the intent id, its kind and a fixed bilingual text; the app
-  fetches the details over its own authenticated session. Nothing about the customer, the caller or
+- **Minimal payload.** A push carries the intent id, its kind and a fixed bilingual text (on iOS the ids
+  also sit under `body`, where expo-notifications reads them); the app fetches the details over its own
+  authenticated session.
+- **Dead tokens.** FCM UNREGISTERED and APNs 410 or BadDeviceToken clear that token (only if the app
+  has not registered a new one meanwhile); every provider error goes into the delivery trail and the log.
+- **Back office** sends nothing, so it needs no provider settings or secrets. Nothing about the customer, the caller or
   the purpose passes through Google or Apple.
 - **Fail at start, not per message.** Outside local, settings refuse real mode with any provider value
   missing; an unreadable Apple key stops the process at start.

@@ -13,7 +13,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from app.modules.delivery.adapters import PushTarget
+from app.modules.delivery.adapters import PushResult, PushTarget
 from app.platform.providers.push import ApnsSender, FcmSender, PlatformPushSender
 from app.platform.providers.sms import SmsSendFailed, TaqnyatSms, UnifonicSms
 
@@ -262,6 +262,7 @@ def test_install_fails_fast_on_an_unreadable_apple_key(monkeypatch: pytest.Monke
 
     for k, v in {
         "use_mock_adapters": False,
+        "backoffice_enabled": False,
         "sms_provider": "taqnyat",
         "fcm_project_id": "",
         "apns_key_id": "K",
@@ -271,3 +272,101 @@ def test_install_fails_fast_on_an_unreadable_apple_key(monkeypatch: pytest.Monke
         monkeypatch.setattr(settings, k, v)
     with pytest.raises(Exception):  # noqa: B017
         wiring.install()
+
+
+def test_back_office_needs_no_provider_settings() -> None:
+    from app.core.config import Settings
+
+    s = Settings(
+        environment="production",
+        jwt_secret="x" * 40,
+        webhook_secret_key="Zm9vYmFyYmF6cXV4cXV1eHF1dXhxdXV4cXV1eHF1dXg=",
+        phone_pepper="p",
+        admin_oidc_issuer="https://idp.example",
+        staff_oidc_issuer="https://staff.example",
+        use_mock_adapters=False,
+        blob_backend="gcs",
+        blob_bucket="b",
+        backoffice_enabled=True,
+        backoffice_database_url="postgresql+psycopg://ringsays_backoffice:real@db/ringsays",
+        portal_origins=["https://portal.example"],
+    )
+    s.assert_safe_for_environment()  # no SMS or Apple values: fine for the back office
+
+
+def test_back_office_install_is_a_no_op(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core.config import settings
+    from app.platform.providers import wiring
+
+    monkeypatch.setattr(settings, "use_mock_adapters", False)
+    monkeypatch.setattr(settings, "backoffice_enabled", True)
+    monkeypatch.setattr(settings, "sms_provider", "nonsense")
+    wiring.install()  # would raise for the unknown provider if it ran
+
+
+def test_apns_payload_carries_ids_where_expo_reads_them() -> None:
+    sent: list[httpx.Request] = []
+    pem, _ = _p8()
+
+    def handler(r: httpx.Request) -> httpx.Response:
+        sent.append(r)
+        return httpx.Response(200)
+
+    c = httpx.Client(transport=httpx.MockTransport(handler))
+    apns = ApnsSender(key_id="K", team_id="T", private_key_pem=pem, topic="t", client=c)
+    assert apns.send(PushTarget(device_id=uuid4(), platform="IOS", token="a" * 64), "INTENT", INTENT).ok
+    body = json.loads(sent[0].content)
+    assert body["body"] == {"intent_id": str(INTENT), "kind": "INTENT"}
+    assert body["intent_id"] == str(INTENT)
+
+
+def test_apns_stale_provider_token_is_resigned_once() -> None:
+    auths: list[str] = []
+    now = [1_000_000.0]
+    pem, _ = _p8()
+
+    def handler(r: httpx.Request) -> httpx.Response:
+        auths.append(r.headers["authorization"])
+        if len(auths) == 1:
+            return httpx.Response(403, json={"reason": "ExpiredProviderToken"})
+        return httpx.Response(200)
+
+    c = httpx.Client(transport=httpx.MockTransport(handler))
+    apns = ApnsSender(key_id="K", team_id="T", private_key_pem=pem, topic="t", client=c, clock=lambda: now[0])
+    apns._auth()
+    now[0] += 5  # new iat, so a new token
+    assert apns.send(PushTarget(device_id=uuid4(), platform="IOS", token="a" * 64), "INTENT", INTENT).ok
+    assert len(auths) == 2 and auths[0] != auths[1]
+
+
+def test_dead_token_flags() -> None:
+    def fcm(status: int, body: object) -> PushResult:
+        c = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(status, json=body)))
+        return FcmSender(project_id="p", token_provider=lambda: "o", client=c).send(
+            PushTarget(device_id=uuid4(), platform="ANDROID", token="t"), "INTENT", INTENT
+        )
+
+    assert fcm(404, {"error": {"status": "UNREGISTERED"}}).dead_token
+    assert not fcm(400, {"error": {"status": "INVALID_ARGUMENT"}}).dead_token
+    assert not fcm(503, ["not", "a", "dict"]).dead_token  # odd body: failure, no exception
+
+    pem, _ = _p8()
+
+    def apns(status: int, reason: str) -> PushResult:
+        c = httpx.Client(
+            transport=httpx.MockTransport(lambda r: httpx.Response(status, json={"reason": reason}))
+        )
+        s = ApnsSender(key_id="K", team_id="T", private_key_pem=pem, topic="t", client=c)
+        return s.send(PushTarget(device_id=uuid4(), platform="IOS", token="a" * 64), "INTENT", INTENT)
+
+    assert apns(410, "Unregistered").dead_token
+    assert apns(400, "BadDeviceToken").dead_token
+    assert not apns(400, "DeviceTokenNotForTopic").dead_token  # our configuration, not the phone
+
+
+def test_odd_provider_bodies_never_escape_as_other_errors() -> None:
+    ok = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(201, text="<html>ok</html>")))
+    TaqnyatSms(token="t", sender="S", client=ok).send("+966500000001", "m")  # 201 is acceptance
+    lst = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=[1])))
+    with pytest.raises(SmsSendFailed):
+        UnifonicSms(app_sid="a", sender="S", client=lst).send("+966500000001", "m")

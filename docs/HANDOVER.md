@@ -75,7 +75,7 @@ Without Docker see the root `README.md`. Gotchas:
   with `python -m app.worker --once`.
 - Settings fail closed: without `RINGSAYS_ENVIRONMENT=local` the API refuses local secrets and MOCK.
 
-Current results (2026-10-02): 772 backend tests (Python 3.12 locks, real NATS included), all
+Current results (2026-10-02): 780 backend tests (Python 3.12 locks, real NATS included), all
 TypeScript workspace tests, portal 12, app 6 and Mock Bank 4 browser tests, deploy validation clean.
 
 ## 5. Security model (keep these true)

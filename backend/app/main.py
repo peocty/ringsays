@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -20,6 +22,8 @@ from app.modules.intent import api as intent_api
 from app.platform import ratelimit
 from app.platform.providers import wiring as providers
 
+# Application logs (uvicorn configures only its own loggers). One line per event, no personal data.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 settings.assert_safe_for_environment()
 # Recipient directory is RingSays' own database (not an external integration), so it is always real.
 adapters.configure(directory=DbRecipientDirectory())

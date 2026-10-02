@@ -20,6 +20,7 @@ Robustness rules (stage 3 review):
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal
@@ -189,8 +190,7 @@ def _deliver_one(
     if plan.kind != "push":
         return plan.kind
     # Send outside any transaction, then record result.
-    results = [push.send(t, "INTENT", intent_id) for t in plan.targets]
-    ok = sum(r.ok for r in results)
+    ok, failures = _push_all(push, directory, plan.targets, "INTENT", intent_id)
     with worker_tx(engine) as conn:
         intent, _ = repo.load(conn, intent_id, for_update=True)
         conn.execute(
@@ -198,7 +198,7 @@ def _deliver_one(
             .where(delivery_attempts.c.id == plan.attempt_id)
             .values(
                 outcome="SENT" if ok else "FAILED",
-                reason=f"{ok} device(s)" if ok else "all devices rejected push",
+                reason=f"{ok} device(s)" if ok else f"all devices rejected push: {failures}",
             )
         )
         if ok and intent.status is IntentStatus.REQUESTED:
@@ -210,6 +210,29 @@ def _deliver_one(
     if delivered and plan.recipient is not None:
         _note_contact(directory, plan.recipient, intent_id, now, engine)
     return "delivered" if delivered else "push_failed"
+
+
+def _push_all(
+    push: PushSender,
+    directory: RecipientDirectory,
+    targets: Sequence[PushTarget],
+    kind: str,
+    intent_id: UUID,
+) -> tuple[int, str]:
+    """Send to every device. Dead tokens are forgotten; provider errors (no personal data) are logged
+    and returned for the attempt trail, so an operator can tell a wrong Apple key from a removed app."""
+    ok = 0
+    errors: list[str] = []
+    for t in targets:
+        r = push.send(t, kind, intent_id)
+        ok += r.ok
+        if not r.ok:
+            errors.append(r.error or "unknown")
+            if r.dead_token:
+                directory.forget_push_token(t)
+    if errors:
+        log.warning("push failed intent=%s errors=%s", intent_id, sorted(set(errors)))
+    return ok, ", ".join(sorted(set(errors)))[:300]
 
 
 def _note_contact(
@@ -358,7 +381,15 @@ def precall_push_after_commit(
         with tenant_tx(tenant_id) as conn:
             _record(conn, intent, Channel.PRECALL_PUSH, "SKIPPED", now, "calling now: receiver rules")
         return False
-    ok = any(push.send(d, "PRECALL", intent_id).ok for d in recipient.devices)
+    sent, failures = _push_all(push, directory, recipient.devices, "PRECALL", intent_id)
+    ok = sent > 0
     with tenant_tx(tenant_id) as conn:
-        _record(conn, intent, Channel.PRECALL_PUSH, "SENT" if ok else "FAILED", now, "calling now")
+        _record(
+            conn,
+            intent,
+            Channel.PRECALL_PUSH,
+            "SENT" if ok else "FAILED",
+            now,
+            "calling now" if ok else f"calling now: {failures}",
+        )
     return ok

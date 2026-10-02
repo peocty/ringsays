@@ -49,8 +49,8 @@ def push_from_settings() -> PlatformPushSender:
 
 
 def install() -> None:
-    if settings.use_mock_adapters:
-        return
+    if settings.use_mock_adapters or settings.backoffice_enabled:
+        return  # MOCK, or the back office (sends nothing; has no provider secrets)
     sms = sms_from_settings()
     push = push_from_settings()
     if push.apns is not None:

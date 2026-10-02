@@ -2,7 +2,7 @@
 #   tofu -chdir=deploy/terraform/environments/ksa-staging init -backend-config=backend.hcl
 #   tofu -chdir=deploy/terraform/environments/ksa-staging plan
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.9" # variable validation may reference other variables
   backend "gcs" {}
   required_providers {
     google      = { source = "hashicorp/google", version = ">= 6.50, < 8.0" }

@@ -7,11 +7,12 @@ bilingual line with no organisation name, reason or reference.
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from uuid import UUID
 
@@ -27,6 +28,15 @@ _APNS_TOKEN = re.compile(r"[0-9A-Fa-f]{64,200}")
 TITLE = "RingSays"
 BODY = {"INTENT": "طلب اتصال جديد · New call request", "PRECALL": "مكالمة واردة الآن · Calling you now"}
 ANDROID_CHANNEL = "intents"  # created by the app (apps/mobile/src/lib/push.ts)
+
+
+def _json(r: httpx.Response) -> dict[str, object]:
+    """Response body as a dict, or empty: a proxy or WAF page must not turn into an exception."""
+    try:
+        body = r.json()
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
 
 
 def _data(kind: str, intent_id: UUID) -> dict[str, str]:
@@ -58,7 +68,9 @@ class FcmSender:
                 )
             creds = self._creds
             if not creds.valid:  # type: ignore[attr-defined]
-                creds.refresh(google.auth.transport.requests.Request())  # type: ignore[attr-defined]
+                # Default request timeout is 120 s; a slow metadata server must not hold every push.
+                request = google.auth.transport.requests.Request()
+                creds.refresh(functools.partial(request, timeout=5))  # type: ignore[attr-defined]
             return str(creds.token)  # type: ignore[attr-defined]
 
     def send(self, target: PushTarget, kind: str, intent_id: UUID) -> PushResult:
@@ -92,13 +104,14 @@ class FcmSender:
                 c.close()
         if r.status_code == 200:
             return PushResult(ok=True)
-        status = ""
-        try:
-            status = r.json().get("error", {}).get("status", "")
-        except ValueError:
-            pass
-        # UNREGISTERED / NOT_FOUND / INVALID_ARGUMENT: the token is dead; delivery moves to the next channel.
-        return PushResult(ok=False, error=f"fcm {r.status_code} {status}".strip())
+        error = _json(r).get("error")
+        status = str(error.get("status", "")) if isinstance(error, dict) else ""
+        # UNREGISTERED (404): app removed or token rotated. Delivery moves to the next channel either way.
+        return PushResult(
+            ok=False,
+            error=f"fcm {r.status_code} {status}".strip(),
+            dead_token=status == "UNREGISTERED" or (r.status_code == 404 and status in ("", "NOT_FOUND")),
+        )
 
 
 @dataclass
@@ -143,10 +156,20 @@ class ApnsSender:
                 "thread-id": str(intent_id),
                 "interruption-level": "time-sensitive" if kind == "PRECALL" else "active",
             },
+            # Top level for native readers; "body" is where expo-notifications on iOS reads content.data.
             **_data(kind, intent_id),
+            "body": _data(kind, intent_id),
         }
         if not _APNS_TOKEN.fullmatch(target.token):
-            return PushResult(ok=False, error="apns token malformed")
+            return PushResult(ok=False, error="apns token malformed", dead_token=True)
+        result = self._send_once(target, intent_id, payload)
+        if result.error in ("apns 403 ExpiredProviderToken", "apns 403 InvalidProviderToken"):
+            with self._lock:
+                self._jwt = None  # clock skew or rotated key: sign a new token, try once more
+            result = self._send_once(target, intent_id, payload)
+        return result
+
+    def _send_once(self, target: PushTarget, intent_id: UUID, payload: Mapping[str, object]) -> PushResult:
         try:
             bearer = self._auth()
         except Exception as exc:  # unreadable key: install() checks at start, this is a last guard
@@ -172,12 +195,9 @@ class ApnsSender:
                 c.close()
         if r.status_code == 200:
             return PushResult(ok=True)
-        reason = ""
-        try:
-            reason = r.json().get("reason", "")
-        except ValueError:
-            pass
-        return PushResult(ok=False, error=f"apns {r.status_code} {reason}".strip())
+        reason = str(_json(r).get("reason", ""))
+        dead = r.status_code == 410 or reason == "BadDeviceToken"
+        return PushResult(ok=False, error=f"apns {r.status_code} {reason}".strip(), dead_token=dead)
 
 
 @dataclass

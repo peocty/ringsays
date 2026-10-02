@@ -1,4 +1,4 @@
-// Recorded walkthrough for bank pitches (MOCK data). Runs only with DEMO=<folder>; scripts/demo.sh
+// Recorded walkthrough for bank pitches (MOCK data). Runs only with DEMO=<folder>; examples/mock-bank/demo/run.sh
 // then composes the two recordings side by side with captions (demo/compose.py).
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";

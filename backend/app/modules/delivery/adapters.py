@@ -47,11 +47,16 @@ class RecipientDirectory(Protocol):
         """Called after an app delivery, to record the organisation in the user's consent ledger."""
         ...
 
+    def forget_push_token(self, target: PushTarget) -> None:
+        """Provider said the token is dead (app removed, token rotated): stop sending to it."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class PushResult:
     ok: bool
     error: str | None = None
+    dead_token: bool = False  # provider says the token will never work again: forget it
 
 
 class PushSender(Protocol):
@@ -64,6 +69,7 @@ class MockRecipientDirectory:
 
     by_phone: dict[str, Recipient] = field(default_factory=dict)
     contacts: list[tuple[UUID, UUID]] = field(default_factory=list)
+    forgotten: list[UUID] = field(default_factory=list)
 
     def lookup(self, phone_e164: str, tenant_id: UUID | None = None) -> Recipient | None:
         return self.by_phone.get(phone_e164)
@@ -72,6 +78,9 @@ class MockRecipientDirectory:
         self, recipient: Recipient, tenant_id: UUID, basis_ref: str | None, now: datetime
     ) -> None:
         self.contacts.append((recipient.user_ref, tenant_id))
+
+    def forget_push_token(self, target: PushTarget) -> None:
+        self.forgotten.append(target.device_id)
 
 
 @dataclass

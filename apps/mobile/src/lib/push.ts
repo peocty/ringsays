@@ -59,9 +59,16 @@ export function keepPushTokensCurrent(update: (t: PushTokens) => Promise<void>):
 
 /** Intent id from a notification's data, if it is a RingSays intent notification. */
 export function intentIdFrom(n: Notifications.Notification | Notifications.NotificationResponse): string | null {
-  const content = "notification" in n ? n.notification.request.content : n.request.content;
-  const id = (content.data as Record<string, unknown> | undefined)?.intent_id;
-  return typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id) ? id : null;
+  const request = "notification" in n ? n.notification.request : n.request;
+  // content.data on Android (FCM data) and on iOS when the server puts it under "body" (it does);
+  // the raw APNs payload as a fallback, so a payload shape change cannot strand a tap.
+  const raw = (request.trigger as { payload?: Record<string, unknown> } | null)?.payload;
+  const candidates = [request.content.data, raw, raw?.body] as (Record<string, unknown> | undefined)[];
+  for (const c of candidates) {
+    const id = c?.intent_id;
+    if (typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id)) return id;
+  }
+  return null;
 }
 
 export function configureForeground(): void {

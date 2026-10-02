@@ -15,6 +15,14 @@ log = logging.getLogger(__name__)
 TIMEOUT = httpx.Timeout(5.0, connect=3.0)
 
 
+def _json(r: httpx.Response) -> dict[str, object]:
+    try:
+        body = r.json()
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
 class SmsSendFailed(Exception):
     """Provider refused or could not be reached. Message is safe to log (no number, no text)."""
 
@@ -50,10 +58,10 @@ class TaqnyatSms:
                 c.close()
         if r.status_code != 201:
             raise SmsSendFailed(f"taqnyat refused: HTTP {r.status_code}")
-        body = r.json()
+        body = _json(r)  # 201 is acceptance; an odd body (proxy page) is not a reason to resend
         if "[]" == str(body.get("accepted", "")).replace(" ", ""):
             raise SmsSendFailed("taqnyat accepted no recipient")
-        log.info("sms sent", extra={"provider": "taqnyat", "message_id": body.get("messageId")})
+        log.info("sms sent provider=taqnyat message_id=%s", body.get("messageId"))
 
 
 @dataclass
@@ -84,13 +92,13 @@ class UnifonicSms:
         finally:
             if self.client is None:
                 c.close()
-        try:
-            body = r.json()
-        except ValueError as exc:
-            raise SmsSendFailed(f"unifonic bad response: HTTP {r.status_code}") from exc
+        body = _json(r)
+        if not body:
+            raise SmsSendFailed(f"unifonic bad response: HTTP {r.status_code}")
         if r.status_code != 200 or body.get("success") is not True:
             raise SmsSendFailed(f"unifonic refused: {body.get('errorCode', r.status_code)}")
+        data = body.get("data")
         log.info(
-            "sms sent",
-            extra={"provider": "unifonic", "message_id": (body.get("data") or {}).get("MessageID")},
+            "sms sent provider=unifonic message_id=%s",
+            data.get("MessageID") if isinstance(data, dict) else None,
         )

@@ -4,7 +4,7 @@
 # It creates the encrypted, versioned state bucket in me-central2 that the environment uses
 # (environments/*/backend.hcl). The state holds generated secrets: only the platform team may read it.
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.9" # variable validation may reference other variables
   required_providers {
     google = { source = "hashicorp/google", version = ">= 6.50, < 8.0" }
   }

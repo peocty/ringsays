@@ -160,14 +160,20 @@ the API log). The API refuses to start in production with MOCK, or with real pro
 | Apple signing key | Secret Manager `ringsays-apns-private-key`: the whole `.p8` file | Same |
 
 OpenTofu (`real_providers = true`) creates both secrets empty and CMEK encrypted, so the values never
-pass through state. Add them once, then release:
+pass through state. It also enables the messaging API in the Firebase project and grants the API and
+worker identities the messaging role there, so the identity running `tofu apply` needs Service Usage
+Admin and Project IAM Admin on the Firebase project too (a separate project, outside the KSA folder).
+Add the secret values once, then release:
 
 ```sh
 gcloud secrets versions add ringsays-sms-api-key --location=me-central2 --data-file=- <<< "$TOKEN"
 gcloud secrets versions add ringsays-apns-private-key --location=me-central2 --data-file=AuthKey_XXXX.p8
 ```
 
-`release.sh` refuses to release while `providers.env` still has `REPLACE_` values. A provider outage
+`release.sh` refuses to release while `providers.env` still has `REPLACE_` values. Check push with a
+TestFlight or store build (production APNs); a development build has a sandbox token that production
+refuses (`BadDeviceToken`). Dead tokens (app removed) are cleared automatically and the provider's
+error appears in the intent's delivery trail. A provider outage
 shows as `503 sms_unavailable` on code requests (no provider detail reaches the caller) and as failed
 push attempts on the intent, after which delivery falls back as the policy allows. Logs carry only the
 provider name and message id, never the number or the code.

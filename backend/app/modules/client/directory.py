@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, select, update
 
 from app.core.db import worker_tx
 from app.core.phone import phone_hash
@@ -59,6 +59,16 @@ class DbRecipientDirectory:
         return Recipient(
             user_ref=user.id, devices=tuple(targets), preferences=to_engine(doc or {}), blocked=withdrawn
         )
+
+    def forget_push_token(self, target: PushTarget) -> None:
+        # Only if unchanged: the app may have registered a fresh token meanwhile.
+        column = devices.c.apns_token if target.platform == "IOS" else devices.c.fcm_token
+        with worker_tx(self._engine) as conn:
+            conn.execute(
+                update(devices)
+                .where(devices.c.id == target.device_id, column == target.token)
+                .values({column.name: None})
+            )
 
     def note_contact(
         self, recipient: Recipient, tenant_id: UUID, basis_ref: str | None, now: datetime

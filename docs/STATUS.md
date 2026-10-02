@@ -332,7 +332,25 @@ have applied to the whole country; job manifests referenced a ConfigMap by a nam
 | Handover | `docs/HANDOVER.md`: architecture, codebase map, run and test, security model, path to production, ranked open items | Done |
 | ADR | 0015 real providers | Done |
 
-Test count: 772 backend tests.
+Test count: 772 backend tests (before review fixes).
+
+### Independent review (stage 9)
+
+| # | Defect | Fix |
+| --- | --- | --- |
+| 1 | Back office runs the same application with real mode but gets no provider secrets: it would crash at start in production | Back office skips the provider check and wiring (it sends nothing); test |
+| 2 | iOS: expo-notifications reads custom data from the `body` key, so a tapped notification could not open its intent | Ids also under `body`; app reads content data, then the raw APNs payload; app tests |
+| 3 | Push errors discarded: dead tokens kept forever, a wrong Apple key indistinguishable from a removed app | Errors logged and kept in the delivery trail; dead tokens (FCM UNREGISTERED, APNs 410 and BadDeviceToken) cleared, only if unchanged (migration 0007, column grant) |
+| 4 | API configured no application logging: "sms sent" and provider lines invisible | Logging configured at start; provider and message id in the message text |
+| 5 | OpenTofu acts on the Firebase project: applying identity needs rights there | Documented in the runbook |
+| 6 | Variable validation referencing another variable needs OpenTofu 1.9 | `required_version >= 1.9` everywhere |
+| 7 | Non JSON or list bodies from a provider (proxy page) raised the wrong error type (500) | Bodies parsed defensively; Taqnyat 201 counts as accepted |
+| 8 | Google credential refresh could hold every push for 120 s | 5 s timeout |
+| 9 | Stale Apple provider token kept for 40 minutes after key rotation or clock skew | New token and one retry on ExpiredProviderToken or InvalidProviderToken |
+| 10 | Time sensitive interruption needs an entitlement; sandbox tokens fail in production | Entitlement in app.json; runbook: check with a TestFlight or store build |
+| 11 | Demo spec comment named a missing script | Fixed |
+
+Test count after fixes: 780 backend tests, app 13 unit and 6 browser tests.
 
 ## Known gaps
 

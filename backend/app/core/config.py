@@ -148,7 +148,8 @@ class Settings(BaseSettings):
             raise RuntimeError("RINGSAYS_BACKOFFICE_DATABASE_URL must be set when back office is enabled")
         if self.environment == "production" and self.use_mock_adapters:
             raise RuntimeError("mock adapters are not allowed in production")
-        if not self.use_mock_adapters:
+        # The back office deployment sends no SMS or push and gets no provider secrets.
+        if not self.use_mock_adapters and not self.backoffice_enabled:
             missing = [
                 name
                 for name, ok in [
