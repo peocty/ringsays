@@ -19,6 +19,8 @@ infra/              Docker Compose for local development
 deploy/             Kingdom hosting: Terraform (Google Cloud Dammam), Kustomize, release scripts
 docs/adr/           architecture decision records
 docs/STATUS.md      what is done, mocked, or needs device testing
+docs/HANDOVER.md    start here: architecture, codebase map, security model, path to production
+docs/demo/          recorded walkthrough (demo data) and how to record it again
 ```
 
 ## Run locally

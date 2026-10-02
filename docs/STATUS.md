@@ -319,11 +319,26 @@ NATS routes would never authenticate (NATS does not expand variables inside URLs
 would have looked like it came from the load balancer, so the per address sign in code limit would
 have applied to the whole country; job manifests referenced a ConfigMap by a name overlays hash.
 
+## Stage 9 (2026-10-02)
+
+| Area | Item | Status |
+| --- | --- | --- |
+| SMS | Taqnyat and Unifonic adapters, chosen by `RINGSAYS_SMS_PROVIDER`; provider failure is `503 sms_unavailable` without detail | Done, tested here against recorded provider responses; needs a live account check |
+| Push | FCM HTTP v1 (workload identity, no key file) and APNs HTTP/2 (token key, JWT reuse, one connection per process); ids only payload | Done, tested here against recorded responses; needs real phones |
+| Settings | Real mode refuses missing provider values; unreadable Apple key stops the process at start | Done, tested here |
+| Deploy | `real-providers` component (production), `providers.env`, OpenTofu empty CMEK secrets and Firebase messaging role, release refuses `REPLACE_` values | Validated here: kubeconform, kube-linter, Checkov 1732 and 137 passed |
+| Image | Hash locks regenerated (httpx with HTTP/2, google-auth) | Done; CI lock check passes |
+| Demo | One command recorded walkthrough: two browser contexts, captions, side by side composition (`examples/mock-bank/demo/run.sh`) | Done, recorded here: `docs/demo/ringsays-demo.mp4` |
+| Handover | `docs/HANDOVER.md`: architecture, codebase map, run and test, security model, path to production, ranked open items | Done |
+| ADR | 0015 real providers | Done |
+
+Test count: 772 backend tests.
+
 ## Known gaps
 
 - Foundation doc section H transition table predates ADR 0004 refinements.
 - Several list endpoints lack a 4XX response in contracts (lint warnings).
-- SMS provider and push providers (APNs, FCM) are MOCK; real KSA SMS provider and Apple/Google credentials needed.
+- SMS (Taqnyat, Unifonic) and push (FCM, APNs) adapters are built but not yet run against live accounts; CST sender name, provider account, Apple key and Firebase project needed.
 - Consumer to consumer intents and Request to Talk are MVP 2.
 - A Context Token replayed through idempotency comes back null (shown once); a re-issue endpoint is needed.
 - Audit chain heads must be exported to write once storage by an operations job; export target not built.
@@ -338,12 +353,11 @@ have applied to the whole country; job manifests referenced a ConfigMap by a nam
 - Portal Arabic needs native speaker review; server validation messages are English only.
 - Container images not built here (registries blocked); CI builds and scans them.
 - Infrastructure never applied to a real Google Cloud project from here; first apply needs the organisation prerequisites in deploy/README.md.
-- Real SMS (KSA sender ID) and push adapters missing: production refuses MOCK, so production cannot sign anyone in yet.
 - Egress is any public address on 443; narrow to providers with an egress proxy or FQDN policies.
 - Disaster recovery outside the single Google Cloud KSA region needs a second provider in the Kingdom.
 - Staff sign in binding (first sign in of a seeded staff email) is logged, not in a tenant audit chain.
 - Toast messages inside an open dialog may not be announced by screen readers.
-- App and SDK not run on real iPhone or Android phones here; push providers are MOCK; app store builds (EAS) not made.
+- App and SDK not run on real iPhone or Android phones here; app store builds (EAS) not made.
 - Device key is software (exportable inside secure storage); Secure Enclave / StrongBox key planned.
 - App delivery needs push permission; without it intents go by ordinary call (PSTN).
 - Incoming call screen integration (CallKit, ConnectionService) and caller name overlay not built.

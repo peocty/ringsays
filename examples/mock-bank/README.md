@@ -20,7 +20,8 @@ make bank-app                # customer app web preview: http://127.0.0.1:8082 (
 ```
 
 Customers: Noura (Arabic), Faisal (Arabic), Priya (English); demo PIN `2468`.
-Browser tests of the whole flow: `make e2e-bank`.
+Browser tests of the whole flow: `make e2e-bank`. Recorded walkthrough for presentations:
+`demo/run.sh` (see `docs/demo/README.md`).
 
 ## Flow
 
