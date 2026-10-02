@@ -61,3 +61,13 @@ def test_existing_stream_is_reused() -> None:
             p.publish(f"ringsays.test{uuid.uuid4().hex[:8]}.x.y", b"{}")
         finally:
             p.close()
+
+
+def test_unreachable_or_wrong_server_fails_fast() -> None:
+    import time
+
+    started = time.monotonic()
+    p = NatsPublisher("nats://127.0.0.1:4399", timeout_s=1)
+    with pytest.raises(Exception):  # noqa: B017 (any connection error)
+        p.publish("ringsays.t.a.b", b"{}")
+    assert time.monotonic() - started < 10, "a dead broker must not stall the worker pass"

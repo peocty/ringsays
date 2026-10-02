@@ -73,7 +73,19 @@ class NatsPublisher:
         from nats.js.api import DiscardPolicy, RetentionPolicy, StorageType, StreamConfig
         from nats.js.errors import NotFoundError
 
-        self._nc = await nats.connect(self._url, connect_timeout=self._timeout)
+        async def on_error(exc: Exception) -> None:
+            log.warning("nats: %s", type(exc).__name__)
+
+        # Fail fast: a wrong password or unreachable server must not stall the worker's pass; the next
+        # publish reconnects (relay keeps the event pending and retries in order).
+        self._nc = await nats.connect(
+            self._url,
+            connect_timeout=self._timeout,
+            allow_reconnect=False,
+            max_reconnect_attempts=1,  # 0 would mean: retry a refused server forever
+            reconnect_time_wait=0.5,
+            error_cb=on_error,
+        )
         self._js = self._nc.jetstream(timeout=self._timeout)
         config = StreamConfig(
             name=STREAM,
